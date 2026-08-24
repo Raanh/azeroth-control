@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Azeroth Control
+Comment=Upravljaj AzerothCore realmima, botovima i WoW klijentom
+Exec=/home/deck/Applications/azeroth-control/azeroth-control
+Path=/home/deck/Applications/azeroth-control
+Icon=applications-games
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=false

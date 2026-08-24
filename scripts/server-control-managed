@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/install.env"
+RUNTIME="$ROOT/runtime"
+MODULES_DIR="$RUNTIME/modules"
+case "$REALM_KEY" in
+    progression) CONFIG_DIR="$RUNTIME/etc"; LOG_DIR="$RUNTIME/logs" ;;
+    endgame) CONFIG_DIR="$RUNTIME/endgame/etc"; LOG_DIR="$RUNTIME/endgame/logs" ;;
+    qa) CONFIG_DIR="$RUNTIME/qa/etc"; LOG_DIR="$RUNTIME/qa/logs" ;;
+esac
+NETWORK="${CONTAINER_PREFIX}-network"
+DB_VOLUME="${CONTAINER_PREFIX}-database-data"
+DATA_VOLUME="${CONTAINER_PREFIX}-client-data"
+DB_CONTAINER="${CONTAINER_PREFIX}-database"
+AUTH_CONTAINER="${CONTAINER_PREFIX}-authserver"
+WORLD_CONTAINER="${CONTAINER_PREFIX}-worldserver"
+DB_INFO="$DB_CONTAINER;3306;root;$DB_PASSWORD"
+
+port_ready() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+remove_container() { podman rm -f "$1" >/dev/null 2>&1 || true; }
+
+stop_server() {
+    podman stop -t 60 "$WORLD_CONTAINER" "$AUTH_CONTAINER" >/dev/null 2>&1 || true
+    podman stop -t 30 "$DB_CONTAINER" >/dev/null 2>&1 || true
+    for name in "$WORLD_CONTAINER" "$AUTH_CONTAINER" "$DB_CONTAINER" "${CONTAINER_PREFIX}-db-import" "${CONTAINER_PREFIX}-client-data-init"; do
+        remove_container "$name"
+    done
+}
+
+start_server() {
+    if port_ready 3724 && port_ready "$WORLD_PORT"; then
+        printf '%s is already online.\n' "$REALM_NAME"
+        return 0
+    fi
+    mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$MODULES_DIR/mod-playerbots/data/sql"
+    podman network exists "$NETWORK" || podman network create "$NETWORK" >/dev/null
+    podman volume exists "$DB_VOLUME" || podman volume create "$DB_VOLUME" >/dev/null
+    podman volume exists "$DATA_VOLUME" || podman volume create "$DATA_VOLUME" >/dev/null
+    stop_server
+
+    podman run -d --name "$DB_CONTAINER" --network "$NETWORK" --network-alias "$DB_CONTAINER" -p 127.0.0.1:3307:3306 -e "MYSQL_ROOT_PASSWORD=$DB_PASSWORD" -v "$DB_VOLUME:/var/lib/mysql" docker.io/library/mysql:8.4 >/dev/null
+    for _ in $(seq 1 90); do
+        podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 && break
+        sleep 2
+    done
+    podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 || { podman logs --tail 100 "$DB_CONTAINER" >&2; return 1; }
+
+    podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS $PLAYERBOTS_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    podman run --rm --name "${CONTAINER_PREFIX}-client-data-init" -v "$DATA_VOLUME:/azerothcore/env/dist/data" "$DATA_IMAGE"
+    podman run --rm --name "${CONTAINER_PREFIX}-db-import" --userns=keep-id --network "$NETWORK" -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$IMPORT_IMAGE"
+    podman run --rm --userns=keep-id --entrypoint /bin/bash -v "$MODULES_DIR:/export" "$IMPORT_IMAGE" -lc 'mkdir -p /export/mod-playerbots/data/sql && cp -a /azerothcore/modules/mod-playerbots/data/sql/. /export/mod-playerbots/data/sql/'
+
+    if [[ -d "$CONFIG_DIR/modules" ]]; then
+        while IFS= read -r -d '' source_config; do
+            target_config="${source_config%.dist}"
+            [[ -e "$target_config" ]] || cp "$source_config" "$target_config"
+        done < <(find "$CONFIG_DIR/modules" -maxdepth 1 -type f -name '*.conf.dist' -print0)
+    fi
+    podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" acore_auth -e "INSERT INTO realmlist (id,name,address,localAddress,localSubnetMask,port,icon,flag,timezone,allowedSecurityLevel,population,gamebuild) VALUES (1,'$REALM_NAME','127.0.0.1','127.0.0.1','255.255.255.0',$WORLD_PORT,0,0,1,0,0,12340) ON DUPLICATE KEY UPDATE name=VALUES(name),port=VALUES(port),flag=0,gamebuild=12340"
+
+    podman run -d --name "$AUTH_CONTAINER" --restart=on-failure:10 --userns=keep-id --network "$NETWORK" -p 127.0.0.1:3724:3724 -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$AUTH_IMAGE" >/dev/null
+    podman run -di --name "$WORLD_CONTAINER" --userns=keep-id --network "$NETWORK" -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878 -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN=1 -e "AC_AI_PLAYERBOT_MIN_RANDOM_BOTS=$BOT_COUNT" -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1 -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro" -v "$MODULES_DIR:/azerothcore/modules:ro" "$WORLD_IMAGE" >/dev/null
+
+    local stable_checks=0
+    local world_status
+    for _ in $(seq 1 300); do
+        world_status="$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)"
+        if [[ "$world_status" == exited || "$world_status" == dead ]]; then
+            podman logs --tail 180 "$WORLD_CONTAINER" >&2 || true
+            return 1
+        fi
+        if [[ "$world_status" == running ]] && port_ready 3724 && port_ready "$WORLD_PORT"; then
+            stable_checks=$((stable_checks + 1))
+            if (( stable_checks >= 5 )); then
+                printf '%s\n' "$REALM_KEY" > "$RUNTIME/active-realm"
+                printf '%s is ready.\n' "$REALM_NAME"
+                return 0
+            fi
+        else
+            stable_checks=0
+        fi
+        sleep 3
+    done
+    printf 'Timed out waiting for %s.\n' "$REALM_NAME" >&2
+    return 1
+}
+
+console_server() {
+    [[ "$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)" == running ]] || {
+        printf 'The world server must be running before sending console commands.\n' >&2
+        return 1
+    }
+    set +e
+    { cat; sleep 1; printf '\020\021'; } | timeout 20 podman attach --sig-proxy=false "$WORLD_CONTAINER"
+    local attach_status=${PIPESTATUS[1]}
+    set -e
+    [[ $attach_status -eq 0 || $attach_status -eq 124 ]]
+}
+
+case "${1:-status}" in
+    start) start_server ;;
+    stop) stop_server ;;
+    restart) stop_server; start_server ;;
+    status)
+        if port_ready 3724 && port_ready "$WORLD_PORT"; then
+            podman ps --filter "name=$WORLD_CONTAINER" --format '{{.Status}}'
+        else
+            printf 'Offline: auth or world port is unavailable.\n' >&2
+            exit 1
+        fi
+        ;;
+    logs) podman logs --tail "${2:-200}" "$WORLD_CONTAINER" ;;
+    console) console_server ;;
+    *) printf 'Usage: %s {start|stop|restart|status|logs|console}\n' "$0" >&2; exit 2 ;;
+esac

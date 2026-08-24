@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/install.env"
+CONTROL="$ROOT/bin/server-control"
+CONFIG="$CLIENT_PATH/WTF/Config.wtf"
+CLIENT_EXECUTABLE="${CLIENT_EXECUTABLE:-$CLIENT_PATH/Wow.exe}"
+
+if [[ ! -f "$CLIENT_EXECUTABLE" ]]; then
+    printf 'The configured WoW executable is missing: %s\n' "$CLIENT_EXECUTABLE" >&2
+    exit 2
+fi
+mkdir -p "$CLIENT_PATH/WTF" "$ROOT/runtime/proton-prefix"
+if [[ -f "$CONFIG" ]] && ! grep -qi '^SET realmlist "127.0.0.1"' "$CONFIG"; then
+    cp -a "$CONFIG" "$CONFIG.azeroth-control-backup"
+    sed -i 's/^SET realmlist .*/SET realmlist "127.0.0.1"/I' "$CONFIG"
+fi
+grep -qi '^SET realmlist ' "$CONFIG" 2>/dev/null || printf 'SET realmlist "127.0.0.1"\n' >> "$CONFIG"
+
+DISPLAY_MODE="$(DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null | awk '/ connected / { split($3, mode, "+"); if (mode[1] ~ /^[0-9]+x[0-9]+$/) { print mode[1]; exit } }')"
+if [[ ! "$DISPLAY_MODE" =~ ^[0-9]+x[0-9]+$ ]]; then
+    DISPLAY_MODE=1920x1080
+fi
+display_width="${DISPLAY_MODE%x*}"
+display_height="${DISPLAY_MODE#*x}"
+if (( display_width * 9 != display_height * 16 )); then
+    DISPLAY_MODE=1920x1080
+fi
+set_wtf() {
+    local key="$1" value="$2"
+    if grep -qi "^SET $key " "$CONFIG"; then
+        sed -i "s/^SET $key .*/SET $key \"$value\"/I" "$CONFIG"
+    else
+        printf 'SET %s "%s"\n' "$key" "$value" >> "$CONFIG"
+    fi
+}
+set_wtf gxResolution "$DISPLAY_MODE"
+set_wtf gxWindow 1
+set_wtf gxMaximize 1
+
+PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+if [[ ! -x "$PROTON" ]]; then
+    printf 'No Proton installation was found. Install Proton Experimental from Steam first.\n' >&2
+    exit 2
+fi
+
+"$CONTROL" start
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$ROOT/runtime/proton-prefix"
+export STEAM_COMPAT_APP_ID="${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}"
+export SteamAppId="${SteamAppId:-$STEAM_COMPAT_APP_ID}"
+export SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0
+
+focus_wow_window() {
+    command -v xdotool >/dev/null 2>&1 || return 0
+    local window_id
+    for _ in $(seq 1 240); do
+        window_id="$(xdotool search --class 'wow.exe' 2>/dev/null | tail -1)"
+        if [[ -n "$window_id" ]]; then
+            xdotool windowmap "$window_id" >/dev/null 2>&1 || true
+            xdotool windowactivate "$window_id" >/dev/null 2>&1 || true
+            return 0
+        fi
+        sleep 0.25
+    done
+}
+focus_wow_window &
+FOCUS_HELPER_PID=$!
+set +e
+"$PROTON" run "$CLIENT_EXECUTABLE"
+GAME_STATUS="$?"
+set -e
+kill "$FOCUS_HELPER_PID" >/dev/null 2>&1 || true
+if [[ "$STOP_WITH_GAME" == 1 ]]; then
+    "$CONTROL" stop || true
+fi
+exit "$GAME_STATUS"

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "core": {
+    "id": "azerothcore-playerbots",
+    "name": "AzerothCore Playerbots",
+    "repository": "https://github.com/mod-playerbots/azerothcore-wotlk.git",
+    "branch": "Playerbot",
+    "license": "GPL-2.0",
+    "freshInstallReady": true,
+    "estimatedDownloadBytes": 6442450944,
+    "estimatedInstalledBytes": 25769803776
+  },
+  "profiles": [
+    {"id":"progression","name":"Progressive 1–80","expansion":"Wrath of the Lich King","description":"Start at level 1 and progress through Classic, The Burning Crusade and Wrath content.","levelCap":80,"recommendedBots":500,"estimatedBytes":3221225472},
+    {"id":"endgame","name":"Instant Level 80","expansion":"Wrath of the Lich King","description":"Level 80 characters with starter gear for dungeons, raids and battlegrounds.","levelCap":80,"recommendedBots":300,"estimatedBytes":2147483648},
+    {"id":"custom","name":"Custom Realm","expansion":"Wrath of the Lich King","description":"Choose rates, level cap, bot population and optional modules yourself.","levelCap":80,"recommendedBots":200,"estimatedBytes":2147483648}
+  ],
+  "modules": [
+    {"id":"playerbots","name":"Playerbots","description":"Adds autonomous characters that quest, group, raid and participate in PvP.","repository":"https://github.com/mod-playerbots/mod-playerbots.git","license":"AGPL-3.0","required":true,"default":true,"estimatedBytes":536870912},
+    {"id":"dungeon-clear","name":"Dungeon Clear","description":"Improves playerbot dungeon movement, pulls and recovery between encounters.","repository":"https://github.com/jrad7/mod-dungeon-clear.git","license":"GPL-2.0","requires":["playerbots"],"default":true,"estimatedBytes":8388608},
+    {"id":"autobalance","name":"AutoBalance","description":"Scales dungeon and raid enemies to the number and strength of players.","repository":"https://github.com/azerothcore/mod-autobalance.git","license":"AGPL-3.0","default":false,"estimatedBytes":33554432},
+    {"id":"aoe-loot","name":"AoE Loot","description":"Loot all nearby defeated creatures with one interaction.","repository":"https://github.com/azerothcore/mod-aoe-loot.git","license":"AGPL-3.0","default":true,"estimatedBytes":8388608},
+    {"id":"transmog","name":"Transmogrification","description":"Change an item's appearance while keeping its original stats.","repository":"https://github.com/azerothcore/mod-transmog.git","license":"AGPL-3.0","default":true,"estimatedBytes":33554432},
+    {"id":"learn-spells","name":"Learn Spells","description":"Automatically teaches appropriate class spells while leveling.","repository":"https://github.com/azerothcore/mod-learn-spells.git","license":"AGPL-3.0","default":true,"estimatedBytes":8388608},
+    {"id":"auction-house","name":"Auction House Bot","description":"Keeps the auction house populated with believable supply and demand.","repository":"https://github.com/azerothcore/mod-ah-bot.git","license":"AGPL-3.0","default":true,"estimatedBytes":33554432},
+    {"id":"individual-xp","name":"Individual XP","description":"Allows separate experience multipliers for individual players.","repository":"https://github.com/azerothcore/mod-individual-xp.git","license":"AGPL-3.0","default":false,"estimatedBytes":8388608},
+    {"id":"solocraft","name":"SoloCraft","description":"Adds optional stat scaling for solo and undersized group content.","repository":"https://github.com/azerothcore/mod-solocraft.git","license":"AGPL-3.0","default":false,"conflicts":["autobalance"],"estimatedBytes":8388608},
+    {"id":"multibot-bridge","name":"Multibot Bridge","description":"Provides the server bridge used by compatible multibot control addons.","repository":"https://github.com/Wishmaster117/mod-multibot-bridge.git","license":"GPL-2.0","default":true,"requires":["playerbots"],"estimatedBytes":8388608}
+  ]
+}
