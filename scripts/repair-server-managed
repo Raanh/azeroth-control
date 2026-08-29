@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/install.env"
+
+printf '[1/4] Checking required SteamOS tools…\n'
+for command in podman git python3; do
+    command -v "$command" >/dev/null || { printf '%s is not installed.\n' "$command" >&2; exit 2; }
+done
+
+printf '[2/4] Checking managed files and client…\n'
+[[ -d "$ROOT/core/.git" ]] || { printf 'AzerothCore source tree is missing.\n' >&2; exit 2; }
+[[ -f "$CLIENT_EXECUTABLE" ]] || { printf 'Configured WoW executable is missing: %s\n' "$CLIENT_EXECUTABLE" >&2; exit 2; }
+for image in "$WORLD_IMAGE" "$AUTH_IMAGE" "$IMPORT_IMAGE" "$DATA_IMAGE"; do
+    podman image exists "$image" || { printf 'Required image is missing: %s\n' "$image" >&2; exit 2; }
+done
+
+printf '[3/4] Repairing local permissions and runtime folders…\n'
+mkdir -p "$ROOT/runtime/etc" "$ROOT/runtime/logs" "$ROOT/runtime/modules/mod-playerbots/data/sql" "$ROOT/state"
+chmod 700 "$ROOT/bin"
+chmod 755 "$ROOT/bin/server-control" "$ROOT/bin/autologin" "$ROOT/bin/update-server" "$ROOT/bin/repair-server"
+
+printf '[4/4] Running the managed health check…\n'
+if "$ROOT/bin/server-control" status >/dev/null 2>&1; then
+    printf 'Server is already online and healthy.\n'
+else
+    "$ROOT/bin/server-control" start
+fi
+printf 'Repair completed successfully. No databases or WoW files were changed.\n'

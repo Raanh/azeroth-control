@@ -19,7 +19,14 @@ Azeroth Control is an independent community project. It is not affiliated with
 or endorsed by Blizzard Entertainment, Valve, AzerothCore, or the upstream
 module authors.
 
-## What version 0.2 can do
+> [!WARNING]
+> The `main` branch is currently the **0.4 native preview**. The interface is
+> being migrated from Electron/Chromium to Qt 6 Quick for much faster startup,
+> lower overhead, and more predictable SteamOS Gaming Mode behavior. It is
+> usable for testing, but unfinished flows and bugs are expected. The latest
+> packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
+
+## What the 0.4 native preview can do
 
 ### Guided SteamOS installation
 
@@ -33,16 +40,13 @@ module authors.
   dependencies, and conflicts.
 - Validates a user-supplied WoW 3.3.5a client and safely configures its local
   realmlist.
-- Creates the first game account, optionally with administrator permissions
-  and opt-in local autologin. Without autologin, the password is removed from
-  saved installation records afterward.
+- Creates the first game account and removes its password from saved
+  installation records afterward.
 - Builds the server, authentication service, databases, maps, and client data
   as rootless Podman containers.
 - Shows installation stages, elapsed/estimated time, CPU use, memory use, and a
   collapsible technical log.
 - Checkpoints long build stages so an interrupted installation can resume.
-- Creates a server-bound WoW launcher and can add it to Steam.
-- Can stop the local server automatically when WoW exits.
 - Detects, imports, and controls compatible existing installations without
   moving their files.
 - Supports multiple separately managed local server installations.
@@ -50,13 +54,16 @@ module authors.
 ### Dashboard and realm control
 
 - Start, stop, and restart the active local server.
-- Launch the configured WoW or WoW-HD client through Steam.
-- Automatically start the server before launching the game.
 - View realm state, uptime, ports, online bot count, CPU, memory, and recent
   worldserver logs.
 - Remove a server from the dashboard or delete only installations created by
   Azeroth Control. A WoW client is never deleted.
 - Create and restore full database plus server-configuration backups.
+- Detect bundled server-component updates and install them with an automatic
+  full backup, isolated worldserver rebuild, health check, and image/source
+  rollback if activation fails.
+- Repair managed scripts, permissions, runtime folders, container images, and
+  server health without changing databases or WoW files.
 
 ### Bot, queue, and world settings
 
@@ -80,7 +87,7 @@ module authors.
 - Move replaced or removed addon folders into a recoverable local backup.
 - Install the bundled **Azeroth Dungeon Guide**, a large controller-friendly
   Dynamic/Fast/Careful/Manual run selector shown when entering a dungeon.
-- Detect the active WoW Steam shortcut.
+- Detect a user-created WoW Steam shortcut when opening its Steam Input setup.
 - Install the optional **Azeroth FFXIV Crossbar** preset, including:
   - a controller-friendly triple crossbar for ConsolePortLK;
   - L2, R2, and L2+R2 skill banks;
@@ -95,15 +102,14 @@ module authors.
 ### TV and controller interface
 
 - Directional gamepad navigation across the installer and dashboard.
-- `A` selects, `B` goes back, shoulder buttons switch dashboard sections, and
-  `Start` launches WoW from the dashboard.
+- `A` selects, `B` goes back, and shoulder buttons switch dashboard sections.
 - `X` opens the Steam on-screen keyboard only when a text field is focused.
 - Automatic 4K/TV UI scaling plus manual 100–200% scale controls.
 - Steam Gaming Mode exit handling and safe return to the control center.
 
 ## Available server modules
 
-Version 0.2 exposes this curated installer catalog. Modules are downloaded from
+The native preview exposes this curated installer catalog. Modules are downloaded from
 their original repositories and retain their original licenses.
 
 | Module | Default | Purpose |
@@ -124,13 +130,15 @@ that every future upstream commit will remain compatible with this preview.
 
 ## Requirements
 
-Version 0.2 is primarily developed and tested for **x86-64 SteamOS 3.x** on a
+The native preview is primarily developed and tested for **x86-64 SteamOS 3.x** on a
 Steam Deck or Steam Machine. Other x86-64 Linux distributions are experimental.
 
 You should have:
 
 - A separate, complete WoW WotLK 3.3.5a client (build 12340) containing
   `Wow.exe` and a `Data` directory. `Wow-HD.exe` is used when present.
+- A user-created non-Steam shortcut for that WoW executable. Azeroth Control
+  deliberately does not add or launch the game.
 - Proton Experimental installed from the Steam library.
 - Steam and an internet connection for the first build and upstream downloads.
 - Git, Python 3, Podman, and Distrobox available on the host. The v0.2 system
@@ -157,13 +165,17 @@ You should have:
    `Azeroth Control`.
 5. Do not force a Proton compatibility tool for Azeroth Control itself; it is a
    native Linux application. Proton Experimental is used later for WoW.
-6. Return to Gaming Mode, launch Azeroth Control, and choose **Install a new
+6. Still in Desktop Mode, add your own `Wow.exe` or `Wow-HD.exe` as a separate
+   non-Steam game. Open its **Properties → Compatibility**, enable **Force the
+   use of a specific Steam Play compatibility tool**, and choose **Proton
+   Experimental**.
+7. Return to Gaming Mode, launch Azeroth Control, and choose **Install a new
    server**.
 
 The small SteamOS launcher only prepares a clean environment for the native
-AppImage. This avoids Steam overlay variables crashing Electron in Gaming Mode
-and lets Steam close the application cleanly. It does not install a background
-service or require administrator access.
+AppImage. This prevents Steam overlay variables from disrupting Qt's X11
+startup in Gaming Mode and lets Steam close the application cleanly. It does
+not install a background service or require administrator access.
 
 ## First installation guide
 
@@ -174,17 +186,17 @@ service or require administrator access.
 3. **Modules** — keep the defaults for the simplest first test. AutoBalance and
    SoloCraft should not be enabled together.
 4. **Game Client** — select your own WoW 3.3.5a folder and create the first local
-   account. Optional autologin remembers the account and stores the password in
-   a local user-only file (mode 600) so it can be typed at launch. The client
-   remains in its original location. Existing `Config.wtf` is backed up before
-   the realmlist is changed to `127.0.0.1`.
-5. **Review** — confirm disk, estimated time, server behavior, and whether a WoW
-   Steam entry should be created.
+   account. The account name is remembered by the client, but the password is
+   entered manually when WoW is launched separately. The client remains in its
+   original location. Existing `Config.wtf` is backed up before the realmlist
+   is changed to `127.0.0.1`.
+5. **Review** — confirm disk, estimated time, and server behavior. Azeroth
+   Control does not create or modify a WoW Steam library entry.
 6. **Install** — leave the device powered and connected. The CPU may remain near
    100% during the container build. If installation stops, fix the displayed
    problem and select the same resumable installation from the welcome screen.
-7. When complete, open the dashboard and choose **Launch WoW-HD**. The server is
-   started first if needed.
+7. When complete, open the dashboard and start the desired realm. Then switch
+   to Steam and launch the WoW shortcut you created yourself.
 
 ## Party Builder
 
@@ -198,6 +210,10 @@ Choose one tank, one healer and two DPS class/spec combinations, then select
 4. initialize class skills, spellbooks, a selected PvE talent template,
    consumables and level-appropriate equipment; and
 5. summon the prepared party to the leader.
+
+For an existing bot-only party, **Quick Recovery** can summon all bots, match
+their level and refresh gear/spells, perform both operations together, or
+disband the bot group. Existing talent choices are preserved during recovery.
 
 The leader must be online and outside combat, flight, battlegrounds and active
 queues. Party Builder never replaces a group containing another human player
@@ -239,9 +255,12 @@ Proton-prefix configuration. True retail-style nearest-object interaction is
 not available in an unmodified 3.3.5a client, so A uses target interaction with
 ConsolePort's cursor fallback.
 
-## Important v0.2 limitations
+## Important 0.4 native-preview limitations
 
-- This is the first public preview, not a zero-maintenance appliance.
+- The Qt Quick migration is active development. Navigation, focus, layout,
+  installation, Party Builder, and SteamOS integration may still contain bugs.
+- Not every legacy Electron screen has received final visual and controller QA.
+- This is a development preview, not a zero-maintenance appliance.
 - Missing host prerequisites are detected but not installed automatically.
 - The first server build is long and may be affected by upstream repository
   changes.
@@ -251,8 +270,8 @@ ConsolePort's cursor fallback.
 - Steam requires the user to confirm **Apply Layout** for a locally installed
   controller template. Azeroth Control does not change Steam account or
   controller-cloud data.
-- There is no automatic application/core/module updater or rollback manager in
-  v0.2.
+- The managed updater currently ships tested Azeroth Control server components;
+  it does not blindly pull arbitrary upstream AzerothCore or module revisions.
 - SteamOS and Proton updates can change non-Steam-game behavior.
 
 ## Roadmap
@@ -260,7 +279,6 @@ ConsolePort's cursor fallback.
 Planned work includes:
 
 - An in-game, controller-friendly **Azeroth Quick Control** addon.
-- Party Builder removal and stuck-party recovery controls.
 - Group-wide strategies for combat, buffs, grinding, following, questing, and
   regeneration.
 - Expanded Dungeon Guide controls for live pull pacing, recovery and
@@ -269,7 +287,6 @@ Planned work includes:
 - On-demand battleground reserve bots and more configurable LFG compositions.
 - Better raid and PvP orchestration.
 - One-click SteamOS prerequisite setup.
-- Core/module compatibility checks, updates, backups, and rollback.
 - More client addons and more server/expansion providers where legally and
   technically practical.
 
@@ -296,6 +313,19 @@ used for server data.
 
 ## Development
 
+The primary interface is now the C++/Qt 6 Quick application in [`native/`](native/).
+It starts without an embedded browser and communicates with the same
+loopback-only Python control service used by the earlier frontend.
+
+```bash
+cd native
+qmake6 AzerothControl.pro
+make -j"$(nproc)"
+```
+
+The React/Vite and Electron sources remain temporarily in the repository as a
+migration reference and compatibility frontend:
+
 ```bash
 npm install
 npm run build
@@ -303,9 +333,9 @@ npm run desktop
 npm run appimage
 ```
 
-The interface is React/Vite, the desktop shell is Electron, and the local
-allow-listed control service is Python. Server builds and runtime services use
-rootless Podman. See [the architecture notes](docs/ARCHITECTURE.md).
+The primary interface is Qt Quick/C++, the local allow-listed control service
+is Python, and server builds/runtime services use rootless Podman. See the
+[native notes](native/README.md) and [architecture notes](docs/ARCHITECTURE.md).
 
 Issues and focused pull requests are welcome. When reporting an installation
 problem, include the failed stage and relevant technical-log lines, but remove

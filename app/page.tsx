@@ -14,6 +14,8 @@ type PartyRole = 'Tank' | 'Healer' | 'DPS';
 type PartySlot = { role: PartyRole; classId: number; specId: number };
 type PartyStatus = { bridgeReady: boolean; bridgeVersion: string; serverOnline: boolean; players: Array<{ name: string; level: number; classId: number }> };
 type PartyResult = { ok: boolean; leader: string; level: number; bots: Array<{ name: string; classId: number; className: string; specId: number; spec: string }>; message: string };
+type PartyAction = 'summon' | 'prepare' | 'recover' | 'disband';
+type MaintenanceState = { managed: boolean; installedVersion: string; bundledVersion: string; updateAvailable: boolean; freeBytes: number; checks: Array<{ name: string; ok: boolean }>; rollbackImage: string };
 type PartyClass = { id: number; name: string; specs: Array<{ id: number; name: string; role: PartyRole }> };
 
 const realmInfo: Record<Realm, { name: string; detail: string; bots: number }> = {
@@ -26,7 +28,7 @@ const nav: { id: View; icon: string; label: string }[] = [
   { id: 'bots', icon: '♟', label: 'Bots' }, { id: 'queues', icon: '⇄', label: 'Queues' },
   { id: 'party', icon: '♜', label: 'Party Builder' }, { id: 'world', icon: '◎', label: 'World Settings' },
   { id: 'addons', icon: '＋', label: 'Addons' },
-  { id: 'maintenance', icon: '▣', label: 'Backup & Restore' }, { id: 'logs', icon: '≡', label: 'Logs' },
+  { id: 'maintenance', icon: '▣', label: 'Updates & Backups' }, { id: 'logs', icon: '≡', label: 'Logs' },
 ];
 const initialStatus: Status = { realm: 'progression', realmName: 'AzerothCore Progression', availableRealms: ['progression'], port: 8085, state: 'offline', uptime: '—', bots: 0, cpu: '—', memory: '—', job: { running: false, label: '', ok: true, message: '' } };
 const partyClasses: PartyClass[] = [
@@ -78,6 +80,7 @@ export default function Home() {
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [maintenance, setMaintenance] = useState<MaintenanceState | null>(null);
   const [addons, setAddons] = useState<AddonState | null>(null);
   const [addonBusy, setAddonBusy] = useState<string | null>(null);
   const [partyStatus, setPartyStatus] = useState<PartyStatus>({ bridgeReady: false, bridgeVersion: '', serverOnline: false, players: [] });
@@ -117,6 +120,10 @@ export default function Home() {
     try { const data = await api<{ backups: Backup[] }>('/api/backups'); setBackups(data.backups); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to load backups'); }
   }, []);
+  const loadMaintenance = useCallback(async () => {
+    try { setMaintenance(await api<MaintenanceState>('/api/maintenance')); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to inspect managed server'); }
+  }, []);
   const loadAddons = useCallback(async () => {
     try { const next = await window.azerothDesktop?.getAddons(); if (next) setAddons(next); setError(''); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to inspect the WoW AddOns folder'); }
@@ -132,7 +139,8 @@ export default function Home() {
 
   useEffect(() => { window.azerothDesktop?.getUiMetrics().then((metrics) => setAutoScaleValue(metrics.recommendedScale)); }, []);
   useEffect(() => { refresh(); const timer = window.setInterval(refresh, 5000); return () => window.clearInterval(timer); }, [refresh]);
-  useEffect(() => { if (['bots', 'queues', 'world'].includes(view)) loadSettings(selectedRealm); if (view === 'logs') loadLogs(); if (view === 'maintenance') loadBackups(); if (view === 'addons') loadAddons(); if (view === 'party') loadPartyStatus(); }, [view, selectedRealm, loadSettings, loadLogs, loadBackups, loadAddons, loadPartyStatus]);
+  useEffect(() => { if (['bots', 'queues', 'world'].includes(view)) loadSettings(selectedRealm); if (view === 'logs') loadLogs(); if (view === 'maintenance') { loadBackups(); loadMaintenance(); } if (view === 'addons') loadAddons(); if (view === 'party') loadPartyStatus(); }, [view, selectedRealm, loadSettings, loadLogs, loadBackups, loadMaintenance, loadAddons, loadPartyStatus]);
+  useEffect(() => { if (view === 'maintenance') loadMaintenance(); }, [view, status.job.running, loadMaintenance]);
   useEffect(() => { localStorage.setItem('azeroth-control-party', JSON.stringify(party)); }, [party]);
   useEffect(() => { if (status.realm) setSelectedRealm(status.realm); }, [status.realm]);
   useEffect(() => { window.azerothDesktop?.getState().then(setDesktopState); }, []);
@@ -145,17 +153,10 @@ export default function Home() {
   }, [deleteTarget, restoreTarget]);
 
   function changeScale(value: number) { setScaleMode(value); if (value) localStorage.setItem('azeroth-control-ui-scale', String(value)); else localStorage.removeItem('azeroth-control-ui-scale'); void window.azerothDesktop?.setUiScale(value); }
-  async function action(name: 'start' | 'restart' | 'stop' | 'launch-wow', realm: Realm = selectedRealm) {
+  async function action(name: 'start' | 'restart' | 'stop', realm: Realm = selectedRealm) {
     setError(''); setNotice('');
     try { const result = await api<{ message: string }>('/api/action', { method: 'POST', body: JSON.stringify({ action: name, realm }) }); setNotice(result.message); refresh(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Action failed'); }
-  }
-  async function launchWoW() {
-    setError(''); setNotice('');
-    try {
-      const result = window.azerothDesktop ? await window.azerothDesktop.launchGame() : await api<{ message: string }>('/api/action', { method: 'POST', body: JSON.stringify({ action: 'launch-wow', realm: selectedRealm }) });
-      setNotice(result.message);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to launch WoW'); }
   }
   async function changeAddon(addon: ClientAddon) {
     setAddonBusy(addon.id); setError(''); setNotice('');
@@ -212,6 +213,13 @@ export default function Home() {
     try { const result = await api<{ message: string }>('/api/restore', { method: 'POST', body: JSON.stringify({ backupId: restoreTarget.id }) }); setNotice(result.message); setRestoreTarget(null); refresh(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to restore backup'); setRestoreTarget(null); }
   }
+  async function maintenanceAction(actionName: 'update' | 'repair') {
+    setError(''); setNotice('');
+    try {
+      const result = await api<{ message: string }>(`/api/maintenance/${actionName}`, { method: 'POST', body: '{}' });
+      setNotice(result.message); await refresh(); await loadMaintenance();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : `Unable to ${actionName} server`); }
+  }
   function partyClassesForRole(role: PartyRole) { return partyClasses.filter((profile) => profile.specs.some((spec) => spec.role === role)); }
   function changePartyRole(index: number, role: PartyRole) {
     const profile = partyClassesForRole(role)[0];
@@ -240,13 +248,21 @@ export default function Home() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to prepare the party'); }
     finally { setPartyBusy(false); }
   }
+  async function manageParty(actionName: PartyAction) {
+    setPartyBusy(true); setError(''); setNotice('');
+    try {
+      const result = await api<{ message: string }>('/api/party/action', { method: 'POST', body: JSON.stringify({ leader: partyLeader, action: actionName }) });
+      setNotice(result.message); await loadPartyStatus();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to manage the party'); }
+    finally { setPartyBusy(false); }
+  }
   function RealmPicker() { return <div className="realm-tabs">{availableRealms.map((realm) => <button key={realm} className={selectedRealm === realm ? 'active' : ''} onClick={() => setSelectedRealm(realm)}>{realmInfo[realm].name}</button>)}</div>; }
 
   function Dashboard() { const online = status.state === 'online'; return <>
     <section className={`server-card ${online ? '' : 'offline'}`}><div className="server-glow" /><div className="server-copy"><div className="status-line"><span className="pulse" /> SERVER {online ? 'ONLINE' : 'OFFLINE'}</div><h2>{status.realmName}</h2><p>{online ? 'Authentication, world server and database are running.' : 'The server is not running.'}</p><div className="server-meta"><span>Uptime <strong>{status.uptime}</strong></span><span>Port <strong>{status.port}</strong></span><span>Build <strong>3.3.5a</strong></span></div></div><div className="server-controls">{online ? <><button className="danger-button" disabled={status.job.running} onClick={() => action('stop', status.realm)}>Stop Server</button><button className="ghost-button" disabled={status.job.running} onClick={() => action('restart', status.realm)}>Restart</button></> : <button className="primary-button" disabled={status.job.running} onClick={() => action('start', selectedRealm)}>Start Server</button>}</div></section>
     <section className="stats-grid"><article className="stat-card"><span>Online bots</span><strong>{status.bots.toLocaleString('en-US')}</strong><small>Active playerbots</small></article><article className="stat-card"><span>Active realm</span><strong>{realmInfo[status.realm].name}</strong><small>Port {status.port}</small></article><article className="stat-card"><span>Server CPU</span><strong>{status.cpu}</strong><small>Worldserver container</small></article><article className="stat-card"><span>Memory</span><strong>{status.memory}</strong><small>Worldserver container</small></article></section>
     <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK SELECT</p><h3>Installed realms</h3></div><button className="text-button" onClick={() => navigate('realms')}>Manage</button></div><div className="realm-list">{availableRealms.map((realm) => <button className={`realm-row ${status.realm === realm && online ? 'selected' : ''}`} key={realm} onClick={() => action(status.realm === realm && online ? 'restart' : 'start', realm)}><span className="realm-symbol">{status.realm === realm && online ? '◆' : '◇'}</span><span><strong>{realmInfo[realm].name}</strong><small>{realmInfo[realm].detail} · configured on this server</small></span><span className="realm-action">{status.realm === realm && online ? 'Restart' : 'Start'}</span></button>)}</div></section>
-    <section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK CONTROLS</p><h3>Game & party</h3></div><span className="gamepad-hint">START</span></div><p className="panel-description">Launch the HD client, prepare a complete party or adjust dungeon and battleground queues.</p><div className="quick-actions"><button data-gamepad-launch-wow="true" className="primary-button" onClick={launchWoW}>▶ Launch WoW-HD</button><button className="ghost-button party-dashboard-button" onClick={() => navigate('party')}>♜ Build & Summon Party</button><button className="ghost-button" onClick={() => navigate('queues')}>Queue Settings</button><button className="ghost-button" onClick={() => navigate('logs')}>World Log</button></div></section></div>
+    <section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK CONTROLS</p><h3>Server & party</h3></div></div><p className="panel-description">Prepare a complete party or adjust dungeon and battleground queues. Launch WoW separately from your own Steam shortcut.</p><div className="quick-actions"><button className="primary-button party-dashboard-button" onClick={() => navigate('party')}>♜ Build & Summon Party</button><button className="ghost-button" onClick={() => navigate('queues')}>Queue Settings</button><button className="ghost-button" onClick={() => navigate('logs')}>World Log</button></div></section></div>
     <footer className="activity"><span className="activity-icon">{status.job.running ? '…' : '✓'}</span><p><strong>{status.job.running ? status.job.label : 'System ready'}</strong><small>{status.job.running ? 'This may take several minutes.' : `${realmInfo[status.realm].name} · ${status.uptime}`}</small></p><button className="text-button" onClick={() => navigate('logs')}>Open Log</button></footer>
   </>; }
   function Realms() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">SERVER PROFILES</p><h2>Realms</h2><p>Switch the entire local server to another profile with one click.</p></div></div><div className="realm-cards">{availableRealms.map((realm) => <article key={realm} className={status.realm === realm && status.state === 'online' ? 'active' : ''}><span className="realm-card-icon">{realm === 'progression' ? 'Ⅰ' : realm === 'endgame' ? 'Ⅷ' : 'Q'}</span><p className="eyebrow">{status.realm === realm && status.state === 'online' ? 'CURRENTLY ACTIVE' : 'REALM PROFILE'}</p><h3>{realmInfo[realm].name}</h3><p>{realmInfo[realm].detail}<br />{realmInfo[realm].bots} configured bots</p><button className={status.realm === realm && status.state === 'online' ? 'ghost-button' : 'primary-button'} onClick={() => action(status.realm === realm && status.state === 'online' ? 'restart' : 'start', realm)}>{status.realm === realm && status.state === 'online' ? 'Restart' : 'Start'}</button></article>)}</div><div className="installed-heading"><div><p className="eyebrow">LOCAL INSTALLATIONS</p><h2>Servers</h2></div><button className="ghost-button" onClick={async () => { await window.azerothDesktop?.resetOnboarding(); await window.azerothDesktop?.restartApp(); }}>Add Server</button></div><div className="installation-list">{desktopState.installations.map((server) => <article key={server.id} className={server.id === desktopState.activeInstallationId ? 'active' : ''}><div><strong>{server.name}</strong><small>{server.imported ? 'Imported — files stay untouched' : 'Managed by Azeroth Control'}</small><code>{server.path}</code></div><div className="installation-actions">{server.id !== desktopState.activeInstallationId && <button className="ghost-button" onClick={() => selectServer(server.id)}>Use Server</button>}<button className="danger-button" onClick={() => setDeleteTarget(server)}>{server.imported ? 'Forget' : 'Delete'}</button></div></article>)}</div></section>; }
@@ -256,6 +272,8 @@ export default function Home() {
     const selectedPlayer = partyStatus.players.find((player) => player.name === partyLeader);
     const connected = partyStatus.bridgeReady && partyStatus.serverOnline && Boolean(selectedPlayer);
     const canBuild = connected && !partyBusy;
+    const bridgeParts = partyStatus.bridgeVersion.split('.').map(Number);
+    const recoveryReady = connected && (bridgeParts[0] > 0 || bridgeParts[1] >= 3);
     return <section className="page-panel party-builder-page">
       <div className="section-title"><div><p className="eyebrow">MY PARTY</p><h2>Party Builder</h2><p>Create, level, equip and summon a complete five-player party in one action.</p></div><div className="party-title-actions"><button className="ghost-button" disabled={partyBusy} onClick={loadPartyStatus}>Refresh Players</button><button className="primary-button" disabled={!canBuild} onClick={buildParty}>{partyBusy ? 'Preparing…' : '♜ Build & Summon Party'}</button></div></div>
       <div className={`party-connection ${connected ? 'ready' : ''}`}>
@@ -283,6 +301,15 @@ export default function Home() {
       <section className="party-build-action">
         <div><p className="eyebrow">ONE-CLICK PARTY</p><h3>{partyBusy ? 'Preparing your party…' : 'Build, Prepare & Summon'}</h3><p>{partyBusy ? 'PlayerBots is generating level-appropriate talents, spellbooks and equipment. Keep WoW open.' : 'Replaces an existing bot-only party. Human groups, combat, queues and battlegrounds are left untouched.'}</p></div>
         <button className="primary-button party-build-button" disabled={!canBuild} onClick={buildParty}>{partyBusy ? <><span className="button-spinner" /> Preparing bots…</> : <>♜ Build & Summon Party</>}</button>
+      </section>
+      <section className="party-recovery">
+        <div><p className="eyebrow">EXISTING PARTY</p><h3>Quick Recovery</h3><p>{recoveryReady ? 'Fix bots that are stuck, far away, under-levelled or missing equipment and spells.' : 'Install Party Bridge v0.3 from Updates & Backups to enable recovery controls.'}</p></div>
+        <div className="party-recovery-actions">
+          <button className="ghost-button" disabled={!canBuild || !recoveryReady} onClick={() => manageParty('summon')}>Summon</button>
+          <button className="ghost-button" disabled={!canBuild || !recoveryReady} onClick={() => manageParty('prepare')}>Level + Gear + Spells</button>
+          <button className="primary-button" disabled={!canBuild || !recoveryReady} onClick={() => manageParty('recover')}>Recover All</button>
+          <button className="danger-button" disabled={!canBuild || !recoveryReady} onClick={() => manageParty('disband')}>Disband Bots</button>
+        </div>
       </section>
       {partyResult && <section className="party-result"><div><span>✓</span><strong>Party ready at level {partyResult.level}</strong><small>Joined, geared, trained and summoned to {partyResult.leader}</small></div><div className="prepared-bots">{partyResult.bots.map((bot) => <article key={bot.name}><b>{bot.name}</b><span>{bot.className} · {bot.spec}</span></article>)}</div></section>}
       {!partyStatus.players.length && partyStatus.serverOnline && <div className="info-banner"><strong>Log into your character first</strong><span>Party Builder detects the online non-bot character and performs all changes while it is safely present in the world.</span></div>}
@@ -321,11 +348,22 @@ export default function Home() {
       </>}
     </section>;
   }
-  function Maintenance() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">SERVER SAFETY</p><h2>Backup & Restore</h2><p>Full database and configuration snapshots for the active server.</p></div><button className="primary-button large" disabled={status.state !== 'online' || status.job.running} onClick={createBackup}>Create Backup</button></div><div className="info-banner"><strong>Safe local snapshots</strong><span>Backups contain AzerothCore databases and server configuration only. Your WoW client is never copied.</span></div><div className="backup-list">{backups.length ? backups.map((backup) => <article key={backup.id}><div><strong>{new Date(backup.createdAt).toLocaleString('en-GB')}</strong><small>{backup.realm} · {(backup.sizeBytes / 1024 ** 2).toFixed(1)} MB</small></div><button className="ghost-button" disabled={status.state !== 'online' || status.job.running} onClick={() => setRestoreTarget(backup)}>Restore</button></article>) : <div className="empty-backups"><strong>No backups yet</strong><span>Start the server and create your first snapshot.</span></div>}</div></section>; }
+  function Maintenance() { return <section className="page-panel maintenance-page">
+    <div className="section-title"><div><p className="eyebrow">MANAGED SERVER</p><h2>Updates & Repair</h2><p>Install server components with automatic backup, health check and rollback.</p></div><button className="ghost-button" disabled={status.job.running} onClick={() => { loadMaintenance(); loadBackups(); }}>Refresh</button></div>
+    {maintenance && <section className="maintenance-card">
+      <div className="maintenance-version"><span className={maintenance.updateAvailable ? 'update-ready' : 'current'}>{maintenance.updateAvailable ? 'UPDATE READY' : 'UP TO DATE'}</span><h3>Party Bridge {maintenance.installedVersion ? `v${maintenance.installedVersion}` : 'not installed'}</h3><p>{maintenance.updateAvailable ? `Bundled v${maintenance.bundledVersion} adds the newest dashboard and in-game server features.` : `Bundled server components match v${maintenance.bundledVersion || '—'}.`}</p></div>
+      <div className="maintenance-actions"><button className="ghost-button large" disabled={!maintenance.managed || status.job.running} onClick={() => maintenanceAction('repair')}>Repair Server</button><button className="primary-button large" disabled={!maintenance.managed || !maintenance.updateAvailable || status.job.running} onClick={() => maintenanceAction('update')}>{status.job.running && status.job.label.includes('Updating') ? 'Updating…' : 'Install Update'}</button></div>
+      <div className="maintenance-checks">{maintenance.checks.map((check) => <span className={check.ok ? 'ok' : 'bad'} key={check.name}><b>{check.ok ? '✓' : '!'}</b>{check.name}</span>)}<span><b>◫</b>{(maintenance.freeBytes / 1024 ** 3).toFixed(0)} GB free</span></div>
+      {status.job.running && <div className="maintenance-progress"><span className="button-spinner" /><div><strong>{status.job.label}</strong><pre>{status.job.message || 'Preparing safe operation…'}</pre></div></div>}
+      {maintenance.rollbackImage && <small className="rollback-note">Last rollback image retained locally: {maintenance.rollbackImage}</small>}
+    </section>}
+    <div className="section-title backup-heading"><div><p className="eyebrow">SERVER SAFETY</p><h2>Backup & Restore</h2><p>Full database and configuration snapshots for the active server.</p></div><button className="primary-button large" disabled={status.state !== 'online' || status.job.running} onClick={createBackup}>Create Backup</button></div>
+    <div className="info-banner"><strong>Safe local snapshots</strong><span>Updates create a backup automatically. Backups contain databases and server configuration only; your WoW client is never copied.</span></div><div className="backup-list">{backups.length ? backups.map((backup) => <article key={backup.id}><div><strong>{new Date(backup.createdAt).toLocaleString('en-GB')}</strong><small>{backup.realm} · {(backup.sizeBytes / 1024 ** 2).toFixed(1)} MB</small></div><button className="ghost-button" disabled={status.state !== 'online' || status.job.running} onClick={() => setRestoreTarget(backup)}>Restore</button></article>) : <div className="empty-backups"><strong>No backups yet</strong><span>Start the server and create your first snapshot.</span></div>}</div>
+  </section>; }
   function Logs() { return <section className="page-panel logs-page"><div className="section-title"><div><p className="eyebrow">WORLDSERVER</p><h2>Live Log</h2><p>The last 220 lines from the active worldserver.</p></div><button className="ghost-button" onClick={loadLogs}>Refresh</button></div><pre>{logs}</pre></section>; }
 
   return <main className="shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">A</span><div><strong>Azeroth</strong><span>Control</span></div></div><nav aria-label="Main navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => navigate(item.id)}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-foot"><span className={`health-dot ${status.state}`} /> {status.state === 'online' ? 'Local connection' : 'Server offline'}<small>Steam machine · deck</small><button className="exit-app-button" onClick={() => window.azerothDesktop?.quitApp()}>Exit App</button></div></aside>
-    <section className="content"><header className="topbar"><div><p className="eyebrow">STEAMOS · LOCAL SERVER</p><h1>{nav.find((item) => item.id === view)?.label}</h1></div><div className="top-actions"><label className="scale-control"><span>UI size</span><select value={scaleMode} onChange={(e) => changeScale(Number(e.target.value))}><option value={0}>Auto ({Math.round(autoScaleValue * 100)}%)</option><option value={1}>100%</option><option value={1.25}>125%</option><option value={1.5}>150%</option><option value={1.75}>175%</option><option value={2}>200%</option></select></label>{window.azerothDesktop && <button className="ghost-button" onClick={async () => { await window.azerothDesktop?.resetOnboarding(); await window.azerothDesktop?.restartApp(); }}>Add Server</button>}<button className="icon-button" onClick={refresh} aria-label="Refresh status">↻</button><button className="primary-button" onClick={launchWoW}><span>▶</span> Launch WoW-HD</button></div></header>{error && <div className="toast error">{error}<button onClick={() => setError('')}>×</button></div>}{notice && <div className="toast success">{notice}<button onClick={() => setNotice('')}>×</button></div>}{view === 'dashboard' && <Dashboard />}{view === 'realms' && <Realms />}{view === 'bots' && <Bots />}{view === 'queues' && <Queues />}{view === 'party' && <Party />}{view === 'world' && <World />}{view === 'addons' && <Addons />}{view === 'maintenance' && <Maintenance />}{view === 'logs' && <Logs />}</section>{deleteTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-server-title"><p className="eyebrow">CONFIRM SERVER REMOVAL</p><h2 id="delete-server-title">{deleteTarget.imported ? 'Forget this server?' : 'Delete this server?'}</h2><p>{deleteTarget.imported ? 'The server will disappear from Azeroth Control. No server or WoW files will be deleted.' : 'Remove Only keeps everything on disk. Delete Server Data moves managed files to Trash and permanently removes its container database and images. Your WoW client is never deleted.'}</p><code>{deleteTarget.path}</code><div className="modal-actions"><button className="ghost-button" onClick={() => setDeleteTarget(null)}>Cancel</button><button className="danger-button" onClick={() => removeServer(false)}>{deleteTarget.imported ? 'Forget Server' : 'Remove Only'}</button>{!deleteTarget.imported && <button className="danger-button solid" onClick={() => removeServer(true)}>Delete Server Data</button>}</div></section></div>}{restoreTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="restore-title"><p className="eyebrow">CONFIRM RESTORE</p><h2 id="restore-title">Restore this backup?</h2><p>The current AzerothCore databases and server configuration will be replaced. The server restarts automatically when restoration finishes.</p><code>{restoreTarget.id}</code><div className="modal-actions"><button className="ghost-button" onClick={() => setRestoreTarget(null)}>Cancel</button><button className="danger-button solid" onClick={restoreBackup}>Restore Backup</button></div></section></div>}</main>;
+    <section className="content"><header className="topbar"><div><p className="eyebrow">STEAMOS · LOCAL SERVER</p><h1>{nav.find((item) => item.id === view)?.label}</h1></div><div className="top-actions"><label className="scale-control"><span>UI size</span><select value={scaleMode} onChange={(e) => changeScale(Number(e.target.value))}><option value={0}>Auto ({Math.round(autoScaleValue * 100)}%)</option><option value={1}>100%</option><option value={1.25}>125%</option><option value={1.5}>150%</option><option value={1.75}>175%</option><option value={2}>200%</option></select></label>{window.azerothDesktop && <button className="ghost-button" onClick={async () => { await window.azerothDesktop?.resetOnboarding(); await window.azerothDesktop?.restartApp(); }}>Add Server</button>}<button className="icon-button" onClick={refresh} aria-label="Refresh status">↻</button></div></header>{error && <div className="toast error">{error}<button onClick={() => setError('')}>×</button></div>}{notice && <div className="toast success">{notice}<button onClick={() => setNotice('')}>×</button></div>}{view === 'dashboard' && <Dashboard />}{view === 'realms' && <Realms />}{view === 'bots' && <Bots />}{view === 'queues' && <Queues />}{view === 'party' && <Party />}{view === 'world' && <World />}{view === 'addons' && <Addons />}{view === 'maintenance' && <Maintenance />}{view === 'logs' && <Logs />}</section>{deleteTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-server-title"><p className="eyebrow">CONFIRM SERVER REMOVAL</p><h2 id="delete-server-title">{deleteTarget.imported ? 'Forget this server?' : 'Delete this server?'}</h2><p>{deleteTarget.imported ? 'The server will disappear from Azeroth Control. No server or WoW files will be deleted.' : 'Remove Only keeps everything on disk. Delete Server Data moves managed files to Trash and permanently removes its container database and images. Your WoW client is never deleted.'}</p><code>{deleteTarget.path}</code><div className="modal-actions"><button className="ghost-button" onClick={() => setDeleteTarget(null)}>Cancel</button><button className="danger-button" onClick={() => removeServer(false)}>{deleteTarget.imported ? 'Forget Server' : 'Remove Only'}</button>{!deleteTarget.imported && <button className="danger-button solid" onClick={() => removeServer(true)}>Delete Server Data</button>}</div></section></div>}{restoreTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="restore-title"><p className="eyebrow">CONFIRM RESTORE</p><h2 id="restore-title">Restore this backup?</h2><p>The current AzerothCore databases and server configuration will be replaced. The server restarts automatically when restoration finishes.</p><code>{restoreTarget.id}</code><div className="modal-actions"><button className="ghost-button" onClick={() => setRestoreTarget(null)}>Cancel</button><button className="danger-button" onClick={restoreBackup}>Restore Backup</button></div></section></div>}</main>;
 }
 
 function NumberSetting({ title, note, value, min, max, step, suffix, onChange }: { title: string; note: string; value: number; min: number; max: number; step: number; suffix?: string; onChange: (value: number) => void }) {

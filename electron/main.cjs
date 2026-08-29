@@ -6,6 +6,19 @@ const os = require('os');
 const path = require('path');
 const net = require('net');
 
+// Electron's Chromium zygote cannot create its normal sandbox namespaces from
+// inside the SteamOS Gamescope launch environment. Apply the same native flag
+// that Steam Deck users would otherwise need to enter manually in Launch
+// Options. The control service remains loopback-only and renderer Node access
+// stays disabled below.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+  // Electron's Wayland auto-selection can stall before `ready` when Steam
+  // starts the app on Gamescope's disabled secondary display. XWayland is
+  // available in Gaming Mode and consistently creates the control window.
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 const PORT = 8742;
 let mainWindow;
 let backend;
@@ -81,12 +94,27 @@ function syncManagedScripts() {
   for (const managedPath of managedServerPaths()) {
     const bin = path.join(managedPath, 'bin');
     if (!fs.existsSync(bin)) continue;
-    for (const [sourceName, targetName] of [['server-control-managed', 'server-control'], ['launch-wow-managed', 'launch-wow'], ['autologin-managed', 'autologin']]) {
+    for (const [sourceName, targetName] of [
+      ['server-control-managed', 'server-control'], ['launch-wow-managed', 'launch-wow'],
+      ['autologin-managed', 'autologin'], ['update-server-managed', 'update-server'],
+      ['repair-server-managed', 'repair-server'],
+    ]) {
       const source = path.join(resources(), 'scripts', sourceName);
       const target = path.join(bin, targetName);
       if (!fs.existsSync(source)) continue;
       fs.copyFileSync(source, target);
       fs.chmodSync(target, 0o755);
+    }
+    const bridgeSource = path.join(resources(), 'resources', 'modules', 'mod-azeroth-control-bridge');
+    const bundledRoot = path.join(managedPath, 'state', 'bundled');
+    const bridgeTarget = path.join(bundledRoot, 'mod-azeroth-control-bridge');
+    if (fs.existsSync(bridgeSource)) {
+      const temporary = bridgeTarget + '.tmp';
+      fs.mkdirSync(bundledRoot, { recursive: true });
+      fs.rmSync(temporary, { recursive: true, force: true });
+      fs.cpSync(bridgeSource, temporary, { recursive: true });
+      fs.rmSync(bridgeTarget, { recursive: true, force: true });
+      fs.renameSync(temporary, bridgeTarget);
     }
   }
 }
@@ -214,6 +242,23 @@ function recommendedUiScale() {
   const width = screen.getPrimaryDisplay().size.width;
   return width >= 3200 ? 1.75 : width >= 2500 ? 1.5 : width >= 1800 ? 1.25 : 1;
 }
+
+function resumeSteamGame(steamGameId) {
+  const child = spawn('steam', ['-ifrunning', `steam://rungameid/${steamGameId}`], { detached: true, stdio: 'ignore' });
+  child.unref();
+}
+
+function scheduleSteamGameFocus(steamGameId) {
+  // Gamescope can leave a newly started non-Steam game behind the fullscreen
+  // control window. Re-sending the running game URI is Steam's equivalent of
+  // selecting Resume in Gaming Mode, which hands focus to the existing WoW
+  // process without starting a second copy.
+  mainWindow?.blur();
+  for (const delay of [0, 2500, 7000, 15000]) {
+    setTimeout(() => resumeSteamGame(steamGameId), delay);
+  }
+}
+
 function addonState() {
   const clientPath = activeClientPath();
   const steamShortcut = activeClientSteamShortcut();
@@ -572,8 +617,7 @@ ipcMain.handle('game-launch', async () => {
       });
     }
     const steamGameId = (BigInt(steamShortcut.appid) << 32n) | 0x02000000n;
-    const child = spawn('steam', ['-ifrunning', `steam://rungameid/${steamGameId}`], { detached: true, stdio: 'ignore' });
-    child.unref();
+    scheduleSteamGameFocus(steamGameId);
     const autologin = path.join(activeRoot(), 'bin', 'autologin');
     if (fs.existsSync(autologin)) {
       const loginChild = spawn(autologin, [], { detached: true, stdio: 'ignore', env: { ...process.env } });
@@ -689,7 +733,7 @@ ipcMain.handle('install-plan', (_event, selection) => {
   const modules = catalog.modules.filter((item) => selection.modules.includes(item.id));
   const requiredBytes = Number(catalog.core.estimatedInstalledBytes || 0) + Number(profile?.estimatedBytes || 0) + modules.reduce((sum, item) => sum + Number(item.estimatedBytes || 0), 0);
   const disk = diskInfo(fs.existsSync(selection.installRoot) ? selection.installRoot : path.dirname(selection.installRoot));
-  return { requiredBytes, downloadBytes: Number(catalog.core.estimatedDownloadBytes || 0), freeBytes: disk.freeBytes, enoughSpace: disk.freeBytes > requiredBytes * 1.15, steps: ['Prepare writable folders', 'Download open-source core and modules', 'Build server containers', 'Extract data from your local client', 'Create realm databases', 'Add Steam shortcuts', 'Run health check'] };
+  return { requiredBytes, downloadBytes: Number(catalog.core.estimatedDownloadBytes || 0), freeBytes: disk.freeBytes, enoughSpace: disk.freeBytes > requiredBytes * 1.15, steps: ['Prepare writable folders', 'Download open-source core and modules', 'Build server containers', 'Extract data from your local client', 'Create realm databases', 'Finalize local configuration', 'Run health check'] };
 });
 ipcMain.handle('install-start', async (_event, selection) => {
   if (installChild && installChild.exitCode === null) throw new Error('An installation is already running.');

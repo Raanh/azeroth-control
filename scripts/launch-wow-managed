@@ -37,7 +37,10 @@ set_wtf() {
 }
 set_wtf gxResolution "$DISPLAY_MODE"
 set_wtf gxWindow 1
-set_wtf gxMaximize 1
+# The 3.3.5a D3D9 client frequently loses its presented surface when a
+# maximized/borderless window is backgrounded by Gamescope. A screen-sized
+# regular window looks identical in Gaming Mode but survives app switching.
+set_wtf gxMaximize 0
 
 PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
 if [[ ! -x "$PROTON" ]]; then

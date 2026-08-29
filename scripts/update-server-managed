@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/install.env"
+
+CORE="$ROOT/core"
+BRIDGE_SOURCE="$ROOT/state/bundled/mod-azeroth-control-bridge"
+BRIDGE_TARGET="$CORE/modules/mod-azeroth-control-bridge"
+VERSION_FILE="$BRIDGE_SOURCE/VERSION"
+INSTALLED_VERSION_FILE="$ROOT/state/party-bridge-version"
+CONTROL="$ROOT/bin/server-control"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+CANDIDATE_IMAGE="${WORLD_IMAGE}-candidate-$STAMP"
+ROLLBACK_IMAGE="${WORLD_IMAGE}-rollback-$STAMP"
+SOURCE_BACKUP="$ROOT/state/bridge-source-backups/$STAMP"
+DOCKERFILE="$CORE/apps/docker/Dockerfile"
+
+[[ -f "$ROOT/install.env" && -x "$CONTROL" ]] || { printf 'Managed server controls are incomplete. Run Repair first.\n' >&2; exit 2; }
+[[ -d "$CORE/.git" && -f "$DOCKERFILE" ]] || { printf 'AzerothCore source tree is missing or incomplete.\n' >&2; exit 2; }
+[[ -d "$BRIDGE_SOURCE" && -s "$VERSION_FILE" ]] || { printf 'Bundled Party Bridge payload is missing. Reinstall Azeroth Control.\n' >&2; exit 2; }
+command -v podman >/dev/null || { printf 'Podman is not installed.\n' >&2; exit 2; }
+
+NEW_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+OLD_VERSION="$(tr -d '[:space:]' < "$INSTALLED_VERSION_FILE" 2>/dev/null || true)"
+if [[ "$NEW_VERSION" == "$OLD_VERSION" ]]; then
+    printf 'Party Bridge v%s is already installed. No rebuild is required.\n' "$NEW_VERSION"
+    exit 0
+fi
+
+mkdir -p "$SOURCE_BACKUP" "$ROOT/state/bridge-source-backups"
+if [[ -d "$BRIDGE_TARGET" ]]; then
+    cp -a "$BRIDGE_TARGET/." "$SOURCE_BACKUP/"
+fi
+
+printf '[1/5] Saving rollback image and module source…\n'
+podman image exists "$WORLD_IMAGE" || { printf 'Current worldserver image %s was not found.\n' "$WORLD_IMAGE" >&2; exit 2; }
+podman tag "$WORLD_IMAGE" "$ROLLBACK_IMAGE"
+
+rollback() {
+    local status=$?
+    trap - ERR
+    printf 'Update failed. Restoring the previous image and bridge source…\n' >&2
+    "$CONTROL" stop >/dev/null 2>&1 || true
+    podman tag "$ROLLBACK_IMAGE" "$WORLD_IMAGE" >/dev/null 2>&1 || true
+    if [[ -d "$SOURCE_BACKUP" ]]; then
+        rm -rf "$BRIDGE_TARGET"
+        mkdir -p "$BRIDGE_TARGET"
+        cp -a "$SOURCE_BACKUP/." "$BRIDGE_TARGET/"
+    fi
+    [[ -n "$OLD_VERSION" ]] && printf '%s\n' "$OLD_VERSION" > "$INSTALLED_VERSION_FILE"
+    "$CONTROL" start >/dev/null 2>&1 || true
+    podman image rm "$CANDIDATE_IMAGE" >/dev/null 2>&1 || true
+    exit "$status"
+}
+trap rollback ERR
+
+printf '[2/5] Installing bundled Party Bridge v%s source…\n' "$NEW_VERSION"
+rm -rf "$BRIDGE_TARGET"
+mkdir -p "$BRIDGE_TARGET"
+cp -a "$BRIDGE_SOURCE/." "$BRIDGE_TARGET/"
+
+printf '[3/5] Compiling the updated worldserver container…\n'
+podman build --layers \
+    --build-arg "USER_ID=$(id -u)" \
+    --build-arg "GROUP_ID=$(id -g)" \
+    --build-arg DOCKER_USER=acore \
+    -f "$DOCKERFILE" --target worldserver -t "$CANDIDATE_IMAGE" "$CORE"
+
+printf '[4/5] Activating the new server image…\n'
+"$CONTROL" stop
+podman tag "$CANDIDATE_IMAGE" "$WORLD_IMAGE"
+"$CONTROL" start
+
+printf '[5/5] Verifying server health…\n'
+"$CONTROL" status >/dev/null
+printf '%s\n' "$NEW_VERSION" > "$INSTALLED_VERSION_FILE"
+printf '%s\n' "$ROLLBACK_IMAGE" > "$ROOT/state/last-worldserver-rollback-image"
+podman image rm "$CANDIDATE_IMAGE" >/dev/null 2>&1 || true
+trap - ERR
+printf 'Party Bridge v%s is installed and the realm passed its health check.\n' "$NEW_VERSION"

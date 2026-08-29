@@ -1,0 +1,346 @@
+#include "controller.h"
+
+#include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QNetworkReply>
+#include <QStandardPaths>
+#include <QDateTime>
+#include <QRegularExpression>
+#include <QUrl>
+#include <QUrlQuery>
+
+namespace {
+constexpr auto ApiBase = "http://127.0.0.1:8742";
+
+QJsonObject readJson(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+}
+
+Controller::Controller(QObject *parent) : QObject(parent)
+{
+    m_root = findActiveRoot();
+    m_refreshTimer.setInterval(5000);
+    connect(&m_refreshTimer, &QTimer::timeout, this, &Controller::refresh);
+}
+
+void Controller::start()
+{
+    startBackend();
+    QTimer::singleShot(350, this, &Controller::refresh);
+    m_refreshTimer.start();
+}
+
+QString Controller::findActiveRoot() const
+{
+    const QString config = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        + QStringLiteral("/azeroth-control/state.json");
+    const QJsonObject state = readJson(config);
+    const QString activeId = state.value(QStringLiteral("activeInstallationId")).toString();
+    const QJsonArray installations = state.value(QStringLiteral("installations")).toArray();
+    for (const QJsonValue &value : installations) {
+        const QJsonObject item = value.toObject();
+        if (item.value(QStringLiteral("id")).toString() == activeId)
+            return item.value(QStringLiteral("path")).toString();
+    }
+    return QDir::homePath() + QStringLiteral("/.local/share/azeroth-control/servers/server-3574af7e");
+}
+
+QString Controller::findBackend() const
+{
+    const QString overridePath = qEnvironmentVariable("AZEROTH_CONTROL_BACKEND");
+    if (!overridePath.isEmpty())
+        return overridePath;
+    const QString besideApp = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/../share/azeroth-control/backend/server.py");
+    return QFile::exists(besideApp) ? QDir::cleanPath(besideApp) : QString();
+}
+
+void Controller::startBackend()
+{
+    const QString backendPath = findBackend();
+    if (backendPath.isEmpty()) {
+        setNotice(QStringLiteral("Native backend was not found."));
+        return;
+    }
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("AZEROTH_CONTROL_PORT"), QStringLiteral("8742"));
+    environment.insert(QStringLiteral("AZEROTH_SERVER_ROOT"), m_root);
+    environment.insert(QStringLiteral("AZEROTH_CONTROL_BACKUP_ROOT"),
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/backups"));
+    m_backend.setProcessEnvironment(environment);
+    m_backend.setProgram(QStringLiteral("python3"));
+    m_backend.setArguments({backendPath});
+    m_backend.setProcessChannelMode(QProcess::MergedChannels);
+    m_backend.start();
+}
+
+void Controller::refresh()
+{
+    request(QStringLiteral("/api/status"));
+}
+
+void Controller::loadSettings(const QString &realm)
+{
+    request(QStringLiteral("/api/settings?realm=") + realm);
+}
+
+void Controller::saveSettings(const QVariantMap &settings, const QString &realm)
+{
+    setBusy(true);
+    QJsonObject payload;
+    payload.insert(QStringLiteral("realm"), realm.isEmpty() ? m_activeRealm : realm);
+    payload.insert(QStringLiteral("settings"), QJsonObject::fromVariantMap(settings));
+    request(QStringLiteral("/api/settings"), QByteArrayLiteral("POST"), payload);
+}
+
+void Controller::maintenanceAction(const QString &action)
+{
+    if (action != QStringLiteral("update") && action != QStringLiteral("repair"))
+        return;
+    setBusy(true);
+    request(QStringLiteral("/api/maintenance/") + action, QByteArrayLiteral("POST"));
+}
+
+void Controller::apiGet(const QString &key, const QString &path)
+{
+    Q_UNUSED(key);
+    request(path);
+}
+
+void Controller::apiPost(const QString &key, const QString &path, const QVariantMap &payload)
+{
+    Q_UNUSED(key);
+    setBusy(true);
+    request(path, QByteArrayLiteral("POST"), QJsonObject::fromVariantMap(payload));
+}
+
+void Controller::installServer(const QVariantMap &input)
+{
+    if (m_installRunning)
+        return;
+    QVariantMap selection = input;
+    if (!selection.contains(QStringLiteral("profile")))
+        selection.insert(QStringLiteral("profile"), QStringLiteral("progression"));
+    if (!selection.contains(QStringLiteral("installRoot")))
+        selection.insert(QStringLiteral("installRoot"), QDir::homePath() + QStringLiteral("/.local/share/azeroth-control"));
+    if (!selection.contains(QStringLiteral("serverId")))
+        selection.insert(QStringLiteral("serverId"), QStringLiteral("native-%1").arg(QDateTime::currentDateTimeUtc().toString("yyyyMMddhhmmss")));
+    if (!selection.contains(QStringLiteral("serverName")))
+        selection.insert(QStringLiteral("serverName"), QStringLiteral("Azeroth Progression"));
+    if (!selection.contains(QStringLiteral("bots")))
+        selection.insert(QStringLiteral("bots"), 500);
+    if (!selection.contains(QStringLiteral("modules")))
+        selection.insert(QStringLiteral("modules"), QVariantList{QStringLiteral("playerbots"), QStringLiteral("dungeon-clear"), QStringLiteral("aoe-loot"), QStringLiteral("transmog"), QStringLiteral("learn-spells"), QStringLiteral("auction-house"), QStringLiteral("multibot-bridge")});
+
+    QString installer = qEnvironmentVariable("AZEROTH_CONTROL_INSTALLER");
+    if (installer.isEmpty())
+        installer = QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../share/azeroth-control/scripts/install-server.sh"));
+    if (!QFile::exists(installer)) {
+        setNotice(QStringLiteral("The server installer is not bundled with this preview."));
+        return;
+    }
+    const QString jobs = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/jobs");
+    QDir().mkpath(jobs);
+    const QString configPath = jobs + QStringLiteral("/install-%1.json").arg(QDateTime::currentMSecsSinceEpoch());
+    QFile config(configPath);
+    if (!config.open(QIODevice::WriteOnly)) {
+        setNotice(QStringLiteral("Could not create the installation plan."));
+        return;
+    }
+    config.write(QJsonDocument(QJsonObject::fromVariantMap(selection)).toJson(QJsonDocument::Indented));
+    config.close();
+
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("AZEROTH_CATALOG"), qEnvironmentVariable("AZEROTH_CONTROL_CATALOG", installer.left(installer.lastIndexOf('/')) + QStringLiteral("/../manifests/catalog.json")));
+    m_installProcess.setProcessEnvironment(environment);
+    m_installProcess.setProgram(QStringLiteral("bash"));
+    m_installProcess.setArguments({installer, configPath});
+    m_installProcess.setProcessChannelMode(QProcess::MergedChannels);
+    m_installRunning = true;
+    m_installProgress = 0;
+    m_installMessage = QStringLiteral("Preparing installation…");
+    setBusy(true);
+    emit installChanged();
+    connect(&m_installProcess, &QProcess::readyRead, this, [this] {
+        const QString output = QString::fromUtf8(m_installProcess.readAll()).trimmed();
+        if (output.isEmpty()) return;
+        const QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+        m_installMessage = lines.constLast().trimmed();
+        static const QRegularExpression stepPattern(QStringLiteral("Step\\s+(\\d+)\\s*/\\s*(\\d+)"), QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch match = stepPattern.match(output);
+        if (match.hasMatch())
+            m_installProgress = qRound(match.captured(1).toDouble() * 100.0 / qMax(1, match.captured(2).toInt()));
+        emit installChanged();
+    });
+    connect(&m_installProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+        [this, configPath](int code, QProcess::ExitStatus) {
+            if (code == 0) {
+                const QJsonObject selection = readJson(configPath);
+                const QString serverRoot = QDir::cleanPath(selection.value(QStringLiteral("installRoot")).toString()
+                    + QStringLiteral("/servers/") + selection.value(QStringLiteral("serverId")).toString());
+                const QString statePath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                    + QStringLiteral("/azeroth-control/state.json");
+                QJsonObject state = readJson(statePath);
+                if (state.isEmpty()) {
+                    state.insert(QStringLiteral("schemaVersion"), 1);
+                    state.insert(QStringLiteral("onboardingComplete"), false);
+                    state.insert(QStringLiteral("installations"), QJsonArray{});
+                }
+                QJsonArray installations = state.value(QStringLiteral("installations")).toArray();
+                const QString id = QStringLiteral("managed-") + QString::fromLatin1(QCryptographicHash::hash(serverRoot.toUtf8(), QCryptographicHash::Sha256).toHex().right(12));
+                QJsonArray updated;
+                for (const QJsonValue &value : installations) {
+                    if (value.toObject().value(QStringLiteral("path")).toString() != serverRoot)
+                        updated.append(value);
+                }
+                updated.append(QJsonObject{{QStringLiteral("id"), id},
+                    {QStringLiteral("name"), selection.value(QStringLiteral("serverName")).toString(QStringLiteral("Azeroth Server"))},
+                    {QStringLiteral("path"), serverRoot}, {QStringLiteral("provider"), QStringLiteral("azerothcore-playerbots")},
+                    {QStringLiteral("imported"), false}, {QStringLiteral("createdAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
+                state.insert(QStringLiteral("installations"), updated);
+                state.insert(QStringLiteral("activeInstallationId"), id);
+                state.insert(QStringLiteral("onboardingComplete"), true);
+                QDir().mkpath(QFileInfo(statePath).absolutePath());
+                QFile stateFile(statePath + QStringLiteral(".tmp"));
+                if (stateFile.open(QIODevice::WriteOnly)) {
+                    stateFile.write(QJsonDocument(state).toJson(QJsonDocument::Indented));
+                    stateFile.close();
+                    QFile::remove(statePath);
+                    QFile::rename(statePath + QStringLiteral(".tmp"), statePath);
+                }
+                m_root = serverRoot;
+                // The backend receives AZEROTH_SERVER_ROOT at process start; restart it
+                // so the freshly registered installation becomes the active realm.
+                if (m_backend.state() != QProcess::NotRunning) {
+                    m_backend.terminate();
+                    if (!m_backend.waitForFinished(3000))
+                        m_backend.kill();
+                }
+                startBackend();
+            }
+            m_installRunning = false;
+            m_installProgress = code == 0 ? 100 : m_installProgress;
+            m_installMessage = code == 0 ? QStringLiteral("Installation completed. Restart the native app to load the new server.") : QStringLiteral("Installation failed. Open the installation log and resume the plan.");
+            setBusy(false);
+            emit installChanged();
+            setNotice(m_installMessage);
+            QFile::remove(configPath);
+        });
+    m_installProcess.start();
+}
+
+void Controller::serverAction(const QString &action, const QString &realm)
+{
+    setBusy(true);
+    request(QStringLiteral("/api/action"), QByteArrayLiteral("POST"), {
+        {QStringLiteral("action"), action},
+        {QStringLiteral("realm"), realm.isEmpty() ? m_activeRealm : realm},
+    });
+}
+
+void Controller::request(const QString &path, const QByteArray &method, const QJsonObject &payload)
+{
+    QNetworkRequest request(QUrl(QString::fromLatin1(ApiBase) + path));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = method == QByteArrayLiteral("POST")
+        ? m_network.post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact))
+        : m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path] {
+        const QByteArray body = reply->readAll();
+        const QJsonObject data = QJsonDocument::fromJson(body).object();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (path != QStringLiteral("/api/status"))
+                setNotice(data.value(QStringLiteral("error")).toString(reply->errorString()));
+        } else if (path == QStringLiteral("/api/status")) {
+            applyStatus(data);
+        } else if (path.startsWith(QStringLiteral("/api/settings"))) {
+            const QJsonObject settings = data.value(QStringLiteral("settings")).toObject().isEmpty()
+                ? data : data.value(QStringLiteral("settings")).toObject();
+            m_configuredBots = settings.value(QStringLiteral("botCount")).toInt(m_configuredBots);
+            m_xpRate = settings.value(QStringLiteral("xpRate")).toDouble(m_xpRate);
+            m_dropRate = settings.value(QStringLiteral("dropRate")).toDouble(m_dropRate);
+            m_spawnRate = settings.value(QStringLiteral("spawnRate")).toDouble(m_spawnRate);
+            m_data.insert(path, data.toVariantMap());
+            emit settingsChanged();
+            emit dataChanged();
+            setNotice(QStringLiteral("Settings saved."));
+        } else {
+            m_data.insert(path, data.toVariantMap());
+            emit dataChanged();
+            setNotice(data.value(QStringLiteral("message")).toString(QStringLiteral("Action accepted.")));
+            QTimer::singleShot(500, this, &Controller::refresh);
+        }
+        if (path != QStringLiteral("/api/status"))
+            setBusy(false);
+        reply->deleteLater();
+    });
+}
+
+void Controller::applyStatus(const QJsonObject &payload)
+{
+    m_serverState = payload.value(QStringLiteral("state")).toString(QStringLiteral("offline"));
+    m_realmName = payload.value(QStringLiteral("realmName")).toString(QStringLiteral("AzerothCore"));
+    m_uptime = payload.value(QStringLiteral("uptime")).toString(QStringLiteral("—"));
+    m_cpu = payload.value(QStringLiteral("cpu")).toString(QStringLiteral("—"));
+    m_memory = payload.value(QStringLiteral("memory")).toString(QStringLiteral("—"));
+    m_bots = payload.value(QStringLiteral("bots")).toInt();
+    m_activeRealm = payload.value(QStringLiteral("realm")).toString(QStringLiteral("progression"));
+    m_availableRealms.clear();
+    for (const QJsonValue &realm : payload.value(QStringLiteral("availableRealms")).toArray())
+        m_availableRealms.append(realm.toString());
+    if (m_availableRealms.isEmpty())
+        m_availableRealms.append(m_activeRealm);
+    const QJsonObject job = payload.value(QStringLiteral("job")).toObject();
+    setBusy(job.value(QStringLiteral("running")).toBool());
+    if (!job.value(QStringLiteral("message")).toString().isEmpty())
+        setNotice(job.value(QStringLiteral("message")).toString());
+    emit statusChanged();
+}
+
+void Controller::setBusy(bool value)
+{
+    if (m_busy == value)
+        return;
+    m_busy = value;
+    emit busyChanged();
+}
+
+void Controller::setNotice(const QString &value)
+{
+    QString normalized = value;
+    static const QRegularExpression ansiPattern(QStringLiteral("\\x1b\\[[0-?]*[ -/]*[@-~]"));
+    normalized.remove(ansiPattern);
+    normalized.replace('\r', '\n');
+    QStringList lines;
+    for (const QString &line : normalized.split('\n', Qt::SkipEmptyParts)) {
+        const QString trimmed = line.trimmed();
+        if (!trimmed.isEmpty())
+            lines.append(trimmed);
+    }
+    if (lines.size() > 4)
+        lines = lines.sliced(lines.size() - 4);
+    normalized = lines.join('\n');
+    if (normalized.size() > 700)
+        normalized = QStringLiteral("…") + normalized.right(699);
+    if (m_notice == normalized)
+        return;
+    m_notice = normalized;
+    emit noticeChanged();
+}
+
+void Controller::clearNotice()
+{
+    setNotice({});
+}

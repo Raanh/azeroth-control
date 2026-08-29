@@ -25,9 +25,8 @@ HOME = Path.home()
 ROOT = Path(os.environ.get("AZEROTH_SERVER_ROOT", HOME / "Applications/azerothcore-playerbots")).expanduser().resolve()
 RUNTIME = ROOT / "runtime"
 CONTROL = ROOT / "bin/server-control"
-WOW_LAUNCHER = ROOT / "bin/launch-wow-hd-local"
-if not WOW_LAUNCHER.exists():
-    WOW_LAUNCHER = ROOT / "bin/launch-wow"
+UPDATE_CONTROL = ROOT / "bin/update-server"
+REPAIR_CONTROL = ROOT / "bin/repair-server"
 APP_ROOT = Path(__file__).resolve().parent.parent
 STATIC_ROOT = APP_ROOT / "dist"
 BACKUP_ROOT = Path(os.environ.get("AZEROTH_CONTROL_BACKUP_ROOT", APP_ROOT / "backups")).expanduser()
@@ -111,7 +110,12 @@ def human_duration(started: str) -> str:
     if not started:
         return "—"
     try:
-        began = dt.datetime.fromisoformat(started.replace("Z", "+00:00"))
+        value = started.replace("Z", "+00:00")
+        # Rootless Podman on SteamOS may append a timezone abbreviation and
+        # print nanoseconds; datetime.fromisoformat accepts neither together.
+        value = re.sub(r" ([A-Z]{2,6})$", "", value)
+        value = re.sub(r"(\.\d{6})\d+", r"\1", value)
+        began = dt.datetime.fromisoformat(value)
         seconds = max(0, int((dt.datetime.now(dt.timezone.utc) - began).total_seconds()))
         hours, rem = divmod(seconds, 3600)
         minutes = rem // 60
@@ -310,6 +314,55 @@ def build_party(payload: dict) -> dict:
     }
 
 
+def party_action(payload: dict, action: str) -> dict:
+    if action not in {"summon", "prepare", "recover", "disband"}:
+        raise ValueError("Unknown party recovery action")
+    version = party_bridge_version()
+    try:
+        supported = tuple(int(part) for part in version.split(".")[:2]) >= (0, 3)
+    except ValueError:
+        supported = False
+    if not supported:
+        raise RuntimeError("Party Recovery requires Party Bridge v0.3 or newer. Install the managed update first.")
+    if container_state()[0] != "running":
+        raise RuntimeError("Start the server before managing a party")
+    leader = str(payload.get("leader", ""))
+    if not re.fullmatch(r"[A-Za-z]{2,12}", leader) or leader not in {player["name"] for player in online_human_players()}:
+        raise ValueError("Select an online player character")
+
+    request_id = secrets.token_hex(8)
+    command = f"azerothcontrol party {action} {request_id} {leader}"
+    submitted = run([str(CONTROL), "console"], timeout=30, input_text=command + "\n")
+    if submitted.returncode:
+        raise RuntimeError((submitted.stdout + submitted.stderr).strip()[-800:] or "World console rejected the Party Recovery request")
+
+    marker = f"AZC_PARTY_RESULT|{request_id}|"
+    deadline = time.monotonic() + 180
+    result_line = ""
+    while time.monotonic() < deadline:
+        logs = run(["podman", "logs", "--tail", "10000", WORLD_CONTAINER], timeout=15)
+        combined = logs.stdout + logs.stderr
+        position = combined.rfind(marker)
+        if position >= 0:
+            result_line = combined[position:].splitlines()[0].strip()
+            break
+        time.sleep(0.5)
+    if not result_line:
+        raise RuntimeError("Party Recovery did not finish within three minutes")
+    fields = result_line.split("|")
+    if len(fields) < 5 or fields[2] == "ERR":
+        raise RuntimeError(fields[4] if len(fields) > 4 else "The server could not manage this party")
+    if len(fields) < 6 or fields[2] != "OK":
+        raise RuntimeError("Party Bridge returned an invalid response")
+    labels = {
+        "summon": "Party summoned to your character.",
+        "prepare": "Party matched to your level, geared and trained.",
+        "recover": "Party fully recovered, prepared and summoned.",
+        "disband": "Bot party disbanded.",
+    }
+    return {"ok": True, "action": fields[3], "leader": fields[4], "bots": int(fields[5]), "message": labels[action]}
+
+
 def status_payload() -> dict:
     realm = active_realm()
     state, started = container_state()
@@ -474,8 +527,9 @@ def start_task(label: str, operation) -> bool:
         try:
             result = operation()
             if isinstance(result, subprocess.CompletedProcess):
-                message = (result.stdout + result.stderr).strip()[-2000:]
                 ok = result.returncode == 0
+                output = (result.stdout + result.stderr).strip()
+                message = f"{label} completed successfully." if ok else (output[-1200:] or f"{label} failed.")
             else:
                 message = str(result)
                 ok = True
@@ -487,6 +541,90 @@ def start_task(label: str, operation) -> bool:
 
     threading.Thread(target=worker, daemon=True).start()
     return True
+
+
+def update_job_message(message: str) -> None:
+    with job_lock:
+        job["message"] = message[-4000:]
+
+
+def run_streaming(command: list[str]) -> str:
+    process = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        line = line.rstrip()
+        if line:
+            lines.append(line)
+            update_job_message("\n".join(lines[-12:]))
+    return_code = process.wait()
+    output = "\n".join(lines)
+    if return_code:
+        raise RuntimeError(output[-3000:] or f"Command failed with exit code {return_code}")
+    return output[-3000:]
+
+
+def read_version(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
+
+
+def maintenance_payload() -> dict:
+    installed = party_bridge_version()
+    bundled = read_version(ROOT / "state" / "bundled" / "mod-azeroth-control-bridge" / "VERSION")
+    free = shutil.disk_usage(ROOT).free if ROOT.exists() else 0
+    checks = [
+        {"name": "Managed controls", "ok": CONTROL.is_file() and UPDATE_CONTROL.is_file() and REPAIR_CONTROL.is_file()},
+        {"name": "AzerothCore source", "ok": (ROOT / "core" / ".git").exists()},
+        {"name": "WoW client", "ok": WOW_LAUNCHER.exists()},
+        {"name": "Podman images", "ok": False},
+    ]
+    # install.env is a shell file; querying the active container is a safer image
+    # readiness signal than parsing arbitrary shell quoting in the web process.
+    checks[-1]["ok"] = run(["podman", "image", "exists", container_image_name()]).returncode == 0
+    return {
+        "managed": (ROOT / "install-selection.json").exists(),
+        "installedVersion": installed,
+        "bundledVersion": bundled,
+        "updateAvailable": bool(bundled and bundled != installed),
+        "freeBytes": free,
+        "checks": checks,
+        "rollbackImage": read_version(ROOT / "state" / "last-worldserver-rollback-image"),
+    }
+
+
+def container_image_name() -> str:
+    result = run(["podman", "inspect", "-f", "{{.ImageName}}", WORLD_CONTAINER])
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    try:
+        match = re.search(r"^WORLD_IMAGE=(.*)$", (ROOT / "install.env").read_text(), re.MULTILINE)
+        return (match.group(1).strip().strip("'\"") if match else "missing")
+    except OSError:
+        return "missing"
+
+
+def update_managed_server() -> str:
+    if not UPDATE_CONTROL.exists():
+        raise RuntimeError("Managed update script is missing. Restart Azeroth Control and try again.")
+    if container_state()[0] != "running":
+        update_job_message("Starting the realm before creating a safety backup…")
+        started = run([str(CONTROL), "start"], timeout=1200)
+        if started.returncode:
+            raise RuntimeError((started.stdout + started.stderr)[-2000:])
+    update_job_message("Creating a full database and configuration backup…")
+    backup_message = create_full_backup()
+    update_job_message(f"{backup_message}\nCompiling the managed server update…")
+    result = run_streaming([str(UPDATE_CONTROL)])
+    return f"{backup_message}\n{result}"
+
+
+def repair_managed_server() -> str:
+    if not REPAIR_CONTROL.exists():
+        raise RuntimeError("Managed repair script is missing. Restart Azeroth Control and try again.")
+    return run_streaming([str(REPAIR_CONTROL)])
 
 
 def backup_entries() -> list[dict]:
@@ -562,7 +700,7 @@ def restore_full_backup(backup_id: str) -> str:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "AzerothControl/0.1"
+    server_version = "AzerothControl/0.3"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_ROOT), **kwargs)
@@ -595,6 +733,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json_response({"backups": backup_entries()})
         if parsed.path == "/api/party":
             return self.json_response(party_payload())
+        if parsed.path == "/api/maintenance":
+            return self.json_response(maintenance_payload())
         if parsed.path.startswith("/api/"):
             return self.json_response({"error": "Unknown API route"}, 404)
         if parsed.path != "/" and not (STATIC_ROOT / parsed.path.lstrip("/")).exists():
@@ -620,9 +760,6 @@ class Handler(SimpleHTTPRequestHandler):
                     "restart": (f"Restarting {realm} realm", [str(CONTROL), "restart", realm]),
                     "stop": ("Stopping server", [str(CONTROL), "stop"]),
                 }
-                if action == "launch-wow":
-                    subprocess.Popen([str(WOW_LAUNCHER)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                    return self.json_response({"ok": True, "message": "Launching WoW-HD"})
                 if action not in commands:
                     raise ValueError("Unknown action")
                 label, command = commands[action]
@@ -645,6 +782,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json_response({"ok": True, "message": f"Restoring backup {backup_id}"}, 202)
             if self.path == "/api/party/build":
                 return self.json_response(build_party(payload))
+            if self.path == "/api/party/action":
+                return self.json_response(party_action(payload, str(payload.get("action", ""))))
+            if self.path == "/api/maintenance/update":
+                if not start_task("Updating managed server", update_managed_server):
+                    return self.json_response({"error": "Another server action is still running"}, 409)
+                return self.json_response({"ok": True, "message": "Creating backup and compiling update"}, 202)
+            if self.path == "/api/maintenance/repair":
+                if not start_task("Repairing managed server", repair_managed_server):
+                    return self.json_response({"error": "Another server action is still running"}, 409)
+                return self.json_response({"ok": True, "message": "Running managed repair"}, 202)
             return self.json_response({"error": "Unknown API route"}, 404)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             return self.json_response({"error": str(exc)}, 400)

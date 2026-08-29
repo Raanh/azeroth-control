@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/">
+    <file>qml/Main.qml</file>
+        <file>qml/AzButton.qml</file>
+        <file>qml/AzSelect.qml</file>
+  </qresource>
+</RCC>

@@ -169,7 +169,6 @@ DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
     printf 'BOT_COUNT=%q\n' "$BOT_COUNT"
     printf 'CLIENT_PATH=%q\n' "$CLIENT_PATH"
     printf 'CLIENT_EXECUTABLE=%q\n' "$CLIENT_EXECUTABLE"
-    printf 'STOP_WITH_GAME=%q\n' "$(json_value stopWithGame)"
     printf 'AUTO_LOGIN=%q\n' "${AUTO_LOGIN:-0}"
     printf 'CONTAINER_PREFIX=%q\n' "$CONTAINER_PREFIX"
     printf 'DB_PASSWORD=%q\n' "$DB_PASSWORD"
@@ -182,9 +181,12 @@ DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
 } > "$SERVER_ROOT/install.env"
 printf '%s\n' "$CONTAINER_PREFIX" > "$SERVER_ROOT/state/container-prefix"
 cp "$SCRIPT_DIR/server-control-managed" "$SERVER_ROOT/bin/server-control"
-cp "$SCRIPT_DIR/launch-wow-managed" "$SERVER_ROOT/bin/launch-wow"
 cp "$SCRIPT_DIR/autologin-managed" "$SERVER_ROOT/bin/autologin"
-chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/launch-wow" "$SERVER_ROOT/bin/autologin"
+cp "$SCRIPT_DIR/update-server-managed" "$SERVER_ROOT/bin/update-server"
+cp "$SCRIPT_DIR/repair-server-managed" "$SERVER_ROOT/bin/repair-server"
+mkdir -p "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge"
+cp -a "$PARTY_BRIDGE_SOURCE/." "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge/"
+chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/autologin" "$SERVER_ROOT/bin/update-server" "$SERVER_ROOT/bin/repair-server"
 mkdir -p "$CLIENT_PATH/WTF"
 CLIENT_CONFIG="$CLIENT_PATH/WTF/Config.wtf"
 if [[ -f "$CLIENT_CONFIG" && ! -f "$CLIENT_CONFIG.azeroth-control-backup" ]]; then
@@ -264,25 +266,19 @@ if [[ -n "$ACCOUNT_NAME" && ! -f "$CHECKPOINTS/account" ]]; then
     touch "$CHECKPOINTS/account"
 fi
 
-printf '[6/6] Creating launchers and Steam shortcuts…\n'
-STEAM_LAUNCHER="$SERVER_ROOT/bin/Azeroth-WoW-$SERVER_ID"
-if [[ "$(json_value steamShortcuts)" == 1 && ! -f "$CHECKPOINTS/steam-shortcut" ]] && command -v steamos-add-to-steam >/dev/null 2>&1; then
-    cp "$SERVER_ROOT/bin/launch-wow" "$STEAM_LAUNCHER"
-    chmod +x "$STEAM_LAUNCHER"
-    steamos-add-to-steam "$STEAM_LAUNCHER" || true
-    touch "$CHECKPOINTS/steam-shortcut"
-fi
+printf '[6/6] Finalizing the local server…\n'
 touch "$CHECKPOINTS/complete"
-python3 - "$CONFIG_FILE" "$SERVER_ROOT/install-selection.json" "$CLIENT_EXECUTABLE" "$STEAM_LAUNCHER" <<'PY'
+python3 - "$CONFIG_FILE" "$SERVER_ROOT/install-selection.json" "$CLIENT_EXECUTABLE" <<'PY'
 import json, sys
-client_executable, steam_executable = sys.argv[3:5]
+client_executable = sys.argv[3]
 for name in sys.argv[1:3]:
     try:
         with open(name, encoding="utf-8") as source:
             value = json.load(source)
         value["accountPassword"] = ""
         value["clientExecutable"] = client_executable
-        value["steamExecutable"] = steam_executable if value.get("steamShortcuts") else ""
+        value["steamShortcuts"] = False
+        value["steamExecutable"] = ""
         temporary = name + ".tmp"
         with open(temporary, "w", encoding="utf-8") as target:
             json.dump(value, target, indent=2)

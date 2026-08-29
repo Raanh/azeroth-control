@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_ROOT="${AZEROTH_CONTROL_NATIVE_ROOT:-$HOME/Applications/Azeroth-Control-Native}"
+EXECUTABLE="$APP_ROOT/azeroth-control-native"
+[[ -x "$EXECUTABLE" ]] || { printf 'Azeroth Control native executable is missing: %s\n' "$EXECUTABLE" >&2; exit 2; }
+
+export AZEROTH_CONTROL_BACKEND="$APP_ROOT/backend/server.py"
+export AZEROTH_CONTROL_INSTALLER="$APP_ROOT/scripts/install-server.sh"
+export AZEROTH_CONTROL_CATALOG="$APP_ROOT/manifests/catalog.json"
+export QT_QPA_PLATFORM=xcb
+export QSG_RHI_BACKEND=opengl
+unset WAYLAND_DISPLAY
+unset GAMESCOPE_WAYLAND_DISPLAY
+unset GAMESCOPE_DISPLAY_DISABLED
+unset ENABLE_GAMESCOPE_WSI
+# Steam injects both 32-bit and 64-bit gameoverlayrenderer libraries into
+# shortcut processes. They are useful for games but can stall Qt's xcb plugin
+# before the first window is created.
+unset LD_PRELOAD
+
+exec "$EXECUTABLE" --fullscreen "$@"

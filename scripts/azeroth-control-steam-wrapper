@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APPIMAGE="${AZEROTH_CONTROL_APPIMAGE:-$WRAPPER_DIR/Azeroth-Control-Test.AppImage.bin}"
+[[ -x "$APPIMAGE" ]] || { printf 'Azeroth Control AppImage is missing: %s\n' "$APPIMAGE" >&2; exit 2; }
+
+export AZEROTH_FULLSCREEN=1
+export ELECTRON_OZONE_PLATFORM_HINT=x11
+# Keep the XWayland display supplied by Gamescope, but do not let Electron's
+# Chromium/Vulkan startup bind to the inactive per-game Wayland surface. Steam
+# marks that surface disabled while transitioning away from its loading logo.
+unset WAYLAND_DISPLAY
+unset GAMESCOPE_WAYLAND_DISPLAY
+unset GAMESCOPE_DISPLAY_DISABLED
+unset ENABLE_GAMESCOPE_WSI
+exec "$APPIMAGE" --no-sandbox --ozone-platform=x11 "$@"

@@ -34,13 +34,29 @@ start_server() {
         printf '%s is already online.\n' "$REALM_NAME"
         return 0
     fi
+    # A busy worldserver (especially with hundreds of PlayerBots) may briefly
+    # stop accepting new sockets. Never tear a healthy realm down merely
+    # because one readiness probe happened during that pause.
+    if [[ "$(podman inspect -f '{{.State.Status}}' "$DB_CONTAINER" 2>/dev/null || true)" == running \
+       && "$(podman inspect -f '{{.State.Status}}' "$AUTH_CONTAINER" 2>/dev/null || true)" == running \
+       && "$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)" == running ]]; then
+        for _ in $(seq 1 40); do
+            if port_ready 3724 && port_ready "$WORLD_PORT"; then
+                printf '%s is already online.\n' "$REALM_NAME"
+                return 0
+            fi
+            sleep 0.5
+        done
+        printf '%s is running but temporarily busy; leaving it untouched.\n' "$REALM_NAME"
+        return 0
+    fi
     mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$MODULES_DIR/mod-playerbots/data/sql"
     podman network exists "$NETWORK" || podman network create "$NETWORK" >/dev/null
     podman volume exists "$DB_VOLUME" || podman volume create "$DB_VOLUME" >/dev/null
     podman volume exists "$DATA_VOLUME" || podman volume create "$DATA_VOLUME" >/dev/null
     stop_server
 
-    podman run -d --name "$DB_CONTAINER" --network "$NETWORK" --network-alias "$DB_CONTAINER" -p 127.0.0.1:3307:3306 -e "MYSQL_ROOT_PASSWORD=$DB_PASSWORD" -v "$DB_VOLUME:/var/lib/mysql" docker.io/library/mysql:8.4 >/dev/null
+    podman run -d --name "$DB_CONTAINER" --restart=unless-stopped --network "$NETWORK" --network-alias "$DB_CONTAINER" -p 127.0.0.1:3307:3306 -e "MYSQL_ROOT_PASSWORD=$DB_PASSWORD" -v "$DB_VOLUME:/var/lib/mysql" docker.io/library/mysql:8.4 >/dev/null
     for _ in $(seq 1 90); do
         podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 && break
         sleep 2
@@ -60,8 +76,8 @@ start_server() {
     fi
     podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" acore_auth -e "INSERT INTO realmlist (id,name,address,localAddress,localSubnetMask,port,icon,flag,timezone,allowedSecurityLevel,population,gamebuild) VALUES (1,'$REALM_NAME','127.0.0.1','127.0.0.1','255.255.255.0',$WORLD_PORT,0,0,1,0,0,12340) ON DUPLICATE KEY UPDATE name=VALUES(name),port=VALUES(port),flag=0,gamebuild=12340"
 
-    podman run -d --name "$AUTH_CONTAINER" --restart=on-failure:10 --userns=keep-id --network "$NETWORK" -p 127.0.0.1:3724:3724 -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$AUTH_IMAGE" >/dev/null
-    podman run -di --name "$WORLD_CONTAINER" --userns=keep-id --network "$NETWORK" -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878 -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN=1 -e "AC_AI_PLAYERBOT_MIN_RANDOM_BOTS=$BOT_COUNT" -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1 -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro" -v "$MODULES_DIR:/azerothcore/modules:ro" "$WORLD_IMAGE" >/dev/null
+    podman run -d --name "$AUTH_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK" -p 127.0.0.1:3724:3724 -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$AUTH_IMAGE" >/dev/null
+    podman run -di --name "$WORLD_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK" -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878 -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN=1 -e "AC_AI_PLAYERBOT_MIN_RANDOM_BOTS=$BOT_COUNT" -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1 -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro" -v "$MODULES_DIR:/azerothcore/modules:ro" "$WORLD_IMAGE" >/dev/null
 
     local stable_checks=0
     local world_status

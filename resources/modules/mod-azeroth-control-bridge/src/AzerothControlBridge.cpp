@@ -255,6 +255,68 @@ void PrepareBot(Player* bot, Player* leader, PartySlot const& slot)
     bot->SaveToDB(false, false);
 }
 
+std::vector<Player*> ManagedPartyBots(Player* leader)
+{
+    std::vector<Player*> bots;
+    Group* const group = leader ? leader->GetGroup() : nullptr;
+    if (!group)
+        return bots;
+
+    for (GroupReference* reference = group->GetFirstMember(); reference; reference = reference->next())
+    {
+        Player* const member = reference->GetSource();
+        if (member && member != leader && GET_PLAYERBOT_AI(member))
+            bots.push_back(member);
+    }
+    return bots;
+}
+
+void PrepareExistingBot(Player* bot, Player* leader)
+{
+    PlayerbotAI* const botAI = GET_PLAYERBOT_AI(bot);
+    if (bot->isDead())
+        bot->ResurrectPlayer(1.0f, false);
+    bot->CombatStop(true);
+    bot->GiveLevel(leader->GetLevel());
+    bot->SetUInt32Value(PLAYER_XP, 0);
+    bot->InitStatsForLevel(true);
+
+    PlayerbotFactory factory(bot, leader->GetLevel());
+    factory.InitSkills();
+    factory.InitClassSpells();
+    factory.InitAvailableSpells();
+    factory.InitSpecialSpells();
+    PlayerbotFactory::DestroyEquippedGear(bot);
+    factory.InitEquipment(false, true);
+    factory.InitAmmo();
+    factory.InitGlyphs(false);
+    factory.InitPet();
+    factory.InitPetTalents();
+    factory.InitFood();
+    factory.InitReagents();
+    factory.InitConsumables();
+    factory.InitPotions();
+
+    bot->DurabilityRepairAll(false, 1.0f, false);
+    bot->SetHealth(bot->GetMaxHealth());
+    bot->SetPower(POWER_MANA, bot->GetMaxPower(POWER_MANA));
+    botAI->SetMaster(leader);
+    botAI->Reset();
+    botAI->ResetStrategies(false);
+    bot->SaveToDB(false, false);
+}
+
+bool SummonPartyBot(Player* bot, Player* leader)
+{
+    PlayerbotAI* const botAI = GET_PLAYERBOT_AI(bot);
+    botAI->SetMaster(leader);
+    SummonAction summon(botAI, "azeroth control party recovery");
+    if (summon.Teleport(leader, bot, true))
+        return true;
+    return bot->TeleportTo(leader->GetMapId(), leader->GetPositionX(), leader->GetPositionY(),
+                           leader->GetPositionZ(), leader->GetOrientation());
+}
+
 void EmitResult(ChatHandler* handler, std::string const& result)
 {
     handler->SendSysMessage(result);
@@ -276,6 +338,10 @@ public:
     {
         static ChatCommandTable partyCommands = {
             {"build", HandlePartyBuild, SEC_ADMINISTRATOR, Console::Yes},
+            {"summon", HandlePartySummon, SEC_ADMINISTRATOR, Console::Yes},
+            {"prepare", HandlePartyPrepare, SEC_ADMINISTRATOR, Console::Yes},
+            {"recover", HandlePartyRecover, SEC_ADMINISTRATOR, Console::Yes},
+            {"disband", HandlePartyDisband, SEC_ADMINISTRATOR, Console::Yes},
         };
         static ChatCommandTable bridgeCommands = {
             {"party", partyCommands},
@@ -398,6 +464,104 @@ public:
                << static_cast<uint32>(leader->GetLevel()) << '|' << reserved.size() << '|' << prepared.str();
         EmitResult(handler, result.str());
         return true;
+    }
+
+    static bool HandlePartyAction(ChatHandler* handler, char const* arguments, std::string const& action)
+    {
+        std::istringstream input(arguments ? arguments : "");
+        std::string requestId;
+        std::string leaderName;
+        input >> requestId >> leaderName;
+        if (!IsSafeToken(requestId, 32, true))
+            return false;
+        if (!IsSafeToken(leaderName, 12))
+        {
+            EmitResult(handler, ErrorResult(requestId, "BAD_REQUEST", "Invalid leader name"));
+            return true;
+        }
+
+        Player* const leader = ObjectAccessor::FindPlayerByName(leaderName, true);
+        if (!leader || !leader->GetSession() || GET_PLAYERBOT_AI(leader))
+        {
+            EmitResult(handler, ErrorResult(requestId, "LEADER_OFFLINE", "The selected player is not online"));
+            return true;
+        }
+        Group* const group = leader->GetGroup();
+        if (!group)
+        {
+            EmitResult(handler, ErrorResult(requestId, "NO_PARTY", "The selected player is not in a party"));
+            return true;
+        }
+        if (group->isLFGGroup() || group->isBGGroup() || group->isBFGroup())
+        {
+            EmitResult(handler, ErrorResult(requestId, "SPECIAL_GROUP", "Dungeon Finder and battleground parties are not modified"));
+            return true;
+        }
+        if (GroupHasOtherHuman(group, leader))
+        {
+            EmitResult(handler, ErrorResult(requestId, "HUMAN_PARTY", "Party Recovery works only with bot-only parties"));
+            return true;
+        }
+
+        std::vector<Player*> const bots = ManagedPartyBots(leader);
+        if (bots.empty())
+        {
+            EmitResult(handler, ErrorResult(requestId, "NO_BOTS", "No online bots were found in this party"));
+            return true;
+        }
+        if (action != "disband" && (leader->IsInCombat() || leader->InBattleground() || leader->InBattlegroundQueue() ||
+            leader->IsBeingTeleported() || leader->IsInFlight()))
+        {
+            EmitResult(handler, ErrorResult(requestId, "LEADER_BUSY", "Leave combat, queues, battlegrounds and flight first"));
+            return true;
+        }
+
+        if (action == "disband")
+        {
+            for (Player* bot : bots)
+            {
+                PlayerbotAI* const botAI = GET_PLAYERBOT_AI(bot);
+                botAI->SetMaster(nullptr);
+                botAI->Reset();
+            }
+            group->Disband(true);
+        }
+        else
+        {
+            for (Player* bot : bots)
+            {
+                if (action == "prepare" || action == "recover")
+                    PrepareExistingBot(bot, leader);
+                if (action == "summon" || action == "recover")
+                    SummonPartyBot(bot, leader);
+            }
+        }
+
+        std::ostringstream result;
+        result << "AZC_PARTY_RESULT|" << requestId << "|OK|" << action << '|'
+               << leader->GetName() << '|' << bots.size();
+        EmitResult(handler, result.str());
+        return true;
+    }
+
+    static bool HandlePartySummon(ChatHandler* handler, char const* arguments)
+    {
+        return HandlePartyAction(handler, arguments, "summon");
+    }
+
+    static bool HandlePartyPrepare(ChatHandler* handler, char const* arguments)
+    {
+        return HandlePartyAction(handler, arguments, "prepare");
+    }
+
+    static bool HandlePartyRecover(ChatHandler* handler, char const* arguments)
+    {
+        return HandlePartyAction(handler, arguments, "recover");
+    }
+
+    static bool HandlePartyDisband(ChatHandler* handler, char const* arguments)
+    {
+        return HandlePartyAction(handler, arguments, "disband");
     }
 };
 
