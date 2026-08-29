@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CREDENTIAL="$ROOT/state/autologin.json"
+[[ -f "$CREDENTIAL" ]] || exit 0
+command -v xdotool >/dev/null 2>&1 || exit 0
+
+AUTOLOGIN_PASSWORD="$(python3 - "$CREDENTIAL" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    print(json.load(source).get("password", ""), end="")
+PY
+)"
+[[ -n "$AUTOLOGIN_PASSWORD" ]] || exit 0
+
+# Only one helper may type credentials for this managed realm. WoW already
+# remembers the account name, so the password field is the initial focus.
+exec 9>"$ROOT/runtime/autologin.lock"
+flock -n 9 || exit 0
+for _ in $(seq 1 240); do
+    if pgrep -f '/Wow(-HD)?\.exe|Wow(-HD)?\.exe' >/dev/null 2>&1; then
+        sleep 12
+        xdotool type --clearmodifiers --delay 35 -- "$AUTOLOGIN_PASSWORD"
+        xdotool key --clearmodifiers Return
+        exit 0
+    fi
+    sleep 0.25
+done

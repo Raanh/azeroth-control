@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('azerothDesktop', {
   openSteamInput: () => ipcRenderer.invoke('steam-input-open'),
   installAddon: (id) => ipcRenderer.invoke('addon-install', id),
   removeAddon: (id) => ipcRenderer.invoke('addon-remove', id),
+  installControllerPreset: () => ipcRenderer.invoke('controller-preset-install'),
   detectInstallations: () => ipcRenderer.invoke('installations-detect'),
   importInstallation: (path) => ipcRenderer.invoke('installation-import', path),
   selectInstallation: (id) => ipcRenderer.invoke('installation-select', id),

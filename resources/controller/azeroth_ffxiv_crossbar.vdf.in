@@ -1,0 +1,158 @@
+"controller_mappings"
+{
+	"version"		"3"
+	"game"		"Azeroth FFXIV Crossbar"
+	"title"		"#Title"
+	"description"		"#Description"
+	"controller_type"		"__CONTROLLER_TYPE__"
+	"major_revision"		"0"
+	"minor_revision"		"1"
+	"localization"
+	{
+		"english"
+		{
+			"Title"		"Azeroth FFXIV Crossbar"
+			"Description"		"ConsolePortLK keyboard bridge with L2/R2 skill banks and L1 plus D-pad camera zoom. Install the matching Azeroth Control in-game preset first."
+		}
+	}
+	"group"
+	{
+		"id"		"0"
+		"mode"		"four_buttons"
+		"inputs"
+		{
+			"button_a" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F11, Interact / Skill" } } } }
+			"button_b" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F10, Back / Skill" } } } }
+			"button_x" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F12, Map / Skill" } } } }
+			"button_y" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F9, Jump / Skill" } } } }
+		}
+	}
+	"group"
+	{
+		"id"		"1"
+		"mode"		"dpad"
+		"inputs"
+		{
+			"dpad_north" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F1, Friendly target / Skill" } } } }
+			"dpad_south" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F3, Self target / Skill" } } } }
+			"dpad_east" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F2, Next target / Skill" } } } }
+			"dpad_west" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F4, Previous target / Skill" } } } }
+		}
+		"settings" { "requires_click" "0" "haptic_intensity_override" "0" }
+	}
+	"group"
+	{
+		"id"		"2"
+		"mode"		"absolute_mouse"
+		"inputs"
+		{
+			"click" { "activators" { "Soft_Press" { "bindings" { "binding" "mouse_button LEFT" } } } }
+		}
+		"settings" { "sensitivity" "145" }
+	}
+	"group"
+	{
+		"id"		"3"
+		"mode"		"dpad"
+		"inputs"
+		{
+			"dpad_north" { "activators" { "Full_Press" { "bindings" { "binding" "key_press W" } } } }
+			"dpad_south" { "activators" { "Full_Press" { "bindings" { "binding" "key_press S" } } } }
+			"dpad_east" { "activators" { "Full_Press" { "bindings" { "binding" "key_press D" } } } }
+			"dpad_west" { "activators" { "Full_Press" { "bindings" { "binding" "key_press A" } } } }
+		}
+		"settings" { "requires_click" "0" "edge_binding_radius" "24995" }
+	}
+	"group"
+	{
+		"id"		"4"
+		"mode"		"trigger"
+		"inputs"
+		{
+			"edge" { "activators" { "Full_Press" { "bindings" { "binding" "key_press LEFT_SHIFT, L2 skill bank" } } } }
+		}
+	}
+	"group"
+	{
+		"id"		"5"
+		"mode"		"trigger"
+		"inputs"
+		{
+			"edge" { "activators" { "Full_Press" { "bindings" { "binding" "key_press LEFT_CONTROL, R2 skill bank" } } } }
+		}
+	}
+	"group"
+	{
+		"id"		"6"
+		"mode"		"switches"
+		"inputs"
+		{
+			"button_escape" { "activators" { "Full_Press" { "bindings" { "binding" "key_press ESCAPE, Menu" } } } }
+			"button_menu" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F5, Bags" } } } }
+			"left_bumper"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding" "key_press F7, Target nearest enemy"
+							"binding" "mode_shift dpad 10"
+						}
+					}
+				}
+			}
+			"right_bumper" { "activators" { "Full_Press" { "bindings" { "binding" "key_press F8, Utility ring" } } } }
+			"button_back_left" { "activators" { "Full_Press" { "bindings" { "binding" "key_press LEFT_BRACKET, Extra action" } } } }
+			"button_back_right" { "activators" { "Full_Press" { "bindings" { "binding" "key_press SEMICOLON, Extra action" } } } }
+			"button_back_left_upper" { "activators" { "Full_Press" { "bindings" { "binding" "key_press RIGHT_BRACKET, Extra action" } } } }
+			"button_back_right_upper" { "activators" { "Full_Press" { "bindings" { "binding" "key_press APOSTROPHE, Extra action" } } } }
+		}
+	}
+	"group"
+	{
+		"id"		"9"
+		"mode"		"joystick_mouse"
+		"inputs"
+		{
+			"click" { "activators" { "Full_Press" { "bindings" { "binding" "mouse_button RIGHT" } } } }
+		}
+		"settings" { "output_joystick" "2" "sensitivity" "120" }
+	}
+	"group"
+	{
+		"id"		"10"
+		"mode"		"dpad"
+		"name"		"L1 Camera Zoom"
+		"inputs"
+		{
+			"dpad_north" { "activators" { "Full_Press" { "bindings" { "binding" "mouse_wheel SCROLL_UP, Zoom in" } } } }
+			"dpad_east" { "activators" { "Full_Press" { "bindings" { "binding" "mouse_wheel SCROLL_UP, Zoom in" } } } }
+			"dpad_south" { "activators" { "Full_Press" { "bindings" { "binding" "mouse_wheel SCROLL_DOWN, Zoom out" } } } }
+			"dpad_west" { "activators" { "Full_Press" { "bindings" { "binding" "mouse_wheel SCROLL_DOWN, Zoom out" } } } }
+		}
+		"settings" { "requires_click" "0" "haptic_intensity_override" "0" }
+	}
+	"preset"
+	{
+		"id"		"0"
+		"name"		"Default"
+		"group_source_bindings"
+		{
+			"6"		"switch active"
+			"0"		"button_diamond active"
+			"1"		"dpad active"
+			"2"		"right_trackpad active"
+			"3"		"joystick active"
+			"4"		"left_trigger active"
+			"5"		"right_trigger active"
+			"9"		"right_joystick active"
+		}
+	}
+	"settings"
+	{
+		"left_trackpad_mode"		"0"
+		"right_trackpad_mode"		"0"
+	}
+}

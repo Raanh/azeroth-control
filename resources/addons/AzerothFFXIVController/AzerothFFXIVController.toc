@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: Azeroth FFXIV Controller Preset
+## Notes: FFXIV-style ConsolePortLK crossbar and controller bindings installed by Azeroth Control.
+## Author: Azeroth Control contributors
+## Version: 0.1.0
+## RequiredDeps: ConsolePort, ConsolePortBar
+## SavedVariablesPerCharacter: AzerothFFXIVControllerDB
+
+Generation.lua
+AzerothFFXIVController.lua

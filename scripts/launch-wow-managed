@@ -67,6 +67,9 @@ focus_wow_window() {
 }
 focus_wow_window &
 FOCUS_HELPER_PID=$!
+if [[ "${AUTO_LOGIN:-0}" == 1 && -x "$ROOT/bin/autologin" ]]; then
+    "$ROOT/bin/autologin" >/dev/null 2>&1 &
+fi
 set +e
 "$PROTON" run "$CLIENT_EXECUTABLE"
 GAME_STATUS="$?"

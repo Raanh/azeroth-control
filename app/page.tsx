@@ -8,7 +8,13 @@ type Installation = { id: string; name: string; path: string; provider: string; 
 type DesktopState = { activeInstallationId: string | null; installations: Installation[] };
 type Backup = { id: string; createdAt: string; realm: string; sizeBytes: number };
 type ClientAddon = { id: string; name: string; version: string; category: string; description: string; note: string; sourceUrl: string; installed: boolean; installedVersion: string | null };
-type AddonState = { clientPath: string; addonsPath: string; steamInput: { found: boolean; shortcutName: string; gameId: string }; addons: ClientAddon[] };
+type ControllerPreset = { version: string; installed: boolean; addonInstalled: boolean; steamTemplatesInstalled: number; steamTemplatesExpected: number; steamTemplateName: string; backupPath: string; installedAt: string };
+type AddonState = { clientPath: string; addonsPath: string; steamInput: { found: boolean; shortcutName: string; gameId: string }; addons: ClientAddon[]; controllerPreset: ControllerPreset };
+type PartyRole = 'Tank' | 'Healer' | 'DPS';
+type PartySlot = { role: PartyRole; classId: number; specId: number };
+type PartyStatus = { bridgeReady: boolean; bridgeVersion: string; serverOnline: boolean; players: Array<{ name: string; level: number; classId: number }> };
+type PartyResult = { ok: boolean; leader: string; level: number; bots: Array<{ name: string; classId: number; className: string; specId: number; spec: string }>; message: string };
+type PartyClass = { id: number; name: string; specs: Array<{ id: number; name: string; role: PartyRole }> };
 
 const realmInfo: Record<Realm, { name: string; detail: string; bots: number }> = {
   progression: { name: 'Progression', detail: 'Levels 1–80', bots: 1000 },
@@ -23,6 +29,29 @@ const nav: { id: View; icon: string; label: string }[] = [
   { id: 'maintenance', icon: '▣', label: 'Backup & Restore' }, { id: 'logs', icon: '≡', label: 'Logs' },
 ];
 const initialStatus: Status = { realm: 'progression', realmName: 'AzerothCore Progression', availableRealms: ['progression'], port: 8085, state: 'offline', uptime: '—', bots: 0, cpu: '—', memory: '—', job: { running: false, label: '', ok: true, message: '' } };
+const partyClasses: PartyClass[] = [
+  { id: 1, name: 'Warrior', specs: [{ id: 0, name: 'Arms', role: 'DPS' }, { id: 1, name: 'Fury', role: 'DPS' }, { id: 2, name: 'Protection', role: 'Tank' }] },
+  { id: 2, name: 'Paladin', specs: [{ id: 0, name: 'Holy', role: 'Healer' }, { id: 1, name: 'Protection', role: 'Tank' }, { id: 2, name: 'Retribution', role: 'DPS' }] },
+  { id: 3, name: 'Hunter', specs: [{ id: 0, name: 'Beast Mastery', role: 'DPS' }, { id: 1, name: 'Marksmanship', role: 'DPS' }, { id: 2, name: 'Survival', role: 'DPS' }] },
+  { id: 4, name: 'Rogue', specs: [{ id: 0, name: 'Assassination', role: 'DPS' }, { id: 1, name: 'Combat', role: 'DPS' }, { id: 2, name: 'Subtlety', role: 'DPS' }] },
+  { id: 5, name: 'Priest', specs: [{ id: 0, name: 'Discipline', role: 'Healer' }, { id: 1, name: 'Holy', role: 'Healer' }, { id: 2, name: 'Shadow', role: 'DPS' }] },
+  { id: 6, name: 'Death Knight', specs: [{ id: 0, name: 'Blood', role: 'Tank' }, { id: 1, name: 'Frost', role: 'DPS' }, { id: 2, name: 'Unholy', role: 'DPS' }] },
+  { id: 7, name: 'Shaman', specs: [{ id: 0, name: 'Elemental', role: 'DPS' }, { id: 1, name: 'Enhancement', role: 'DPS' }, { id: 2, name: 'Restoration', role: 'Healer' }] },
+  { id: 8, name: 'Mage', specs: [{ id: 0, name: 'Arcane', role: 'DPS' }, { id: 1, name: 'Fire', role: 'DPS' }, { id: 2, name: 'Frost', role: 'DPS' }] },
+  { id: 9, name: 'Warlock', specs: [{ id: 0, name: 'Affliction', role: 'DPS' }, { id: 1, name: 'Demonology', role: 'DPS' }, { id: 2, name: 'Destruction', role: 'DPS' }] },
+  { id: 11, name: 'Druid', specs: [{ id: 0, name: 'Balance', role: 'DPS' }, { id: 1, name: 'Feral Tank', role: 'Tank' }, { id: 2, name: 'Restoration', role: 'Healer' }, { id: 3, name: 'Feral DPS', role: 'DPS' }] },
+];
+const defaultParty: PartySlot[] = [
+  { role: 'Tank', classId: 1, specId: 2 }, { role: 'Healer', classId: 5, specId: 1 },
+  { role: 'DPS', classId: 8, specId: 2 }, { role: 'DPS', classId: 4, specId: 1 },
+];
+
+function loadPartyPreset(): PartySlot[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('azeroth-control-party') || 'null');
+    return Array.isArray(parsed) && parsed.length === 4 ? parsed : defaultParty;
+  } catch { return defaultParty; }
+}
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) } });
@@ -51,12 +80,13 @@ export default function Home() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [addons, setAddons] = useState<AddonState | null>(null);
   const [addonBusy, setAddonBusy] = useState<string | null>(null);
+  const [partyStatus, setPartyStatus] = useState<PartyStatus>({ bridgeReady: false, bridgeVersion: '', serverOnline: false, players: [] });
+  const [partyLeader, setPartyLeader] = useState('');
+  const [partyBusy, setPartyBusy] = useState(false);
+  const [partyResult, setPartyResult] = useState<PartyResult | null>(null);
   const [scaleMode, setScaleMode] = useState(() => Number(localStorage.getItem('azeroth-control-ui-scale') || 0));
   const [autoScaleValue, setAutoScaleValue] = useState(() => autoScale(window.screen.width));
-  const [party, setParty] = useState([
-    { role: 'Tank', className: 'Warrior', spec: 'Protection' }, { role: 'Healer', className: 'Priest', spec: 'Holy' },
-    { role: 'DPS', className: 'Mage', spec: 'Frost' }, { role: 'DPS', className: 'Rogue', spec: 'Combat' },
-  ]);
+  const [party, setParty] = useState<PartySlot[]>(loadPartyPreset);
   const availableRealms = status.availableRealms?.length ? status.availableRealms : [status.realm];
 
   const navigate = useCallback((next: View) => {
@@ -91,10 +121,19 @@ export default function Home() {
     try { const next = await window.azerothDesktop?.getAddons(); if (next) setAddons(next); setError(''); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to inspect the WoW AddOns folder'); }
   }, []);
+  const loadPartyStatus = useCallback(async () => {
+    try {
+      const next = await api<PartyStatus>('/api/party');
+      setPartyStatus(next);
+      setPartyLeader((current) => next.players.some((player) => player.name === current) ? current : (next.players[0]?.name || ''));
+      setError('');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to inspect online characters'); }
+  }, []);
 
   useEffect(() => { window.azerothDesktop?.getUiMetrics().then((metrics) => setAutoScaleValue(metrics.recommendedScale)); }, []);
   useEffect(() => { refresh(); const timer = window.setInterval(refresh, 5000); return () => window.clearInterval(timer); }, [refresh]);
-  useEffect(() => { if (['bots', 'queues', 'world'].includes(view)) loadSettings(selectedRealm); if (view === 'logs') loadLogs(); if (view === 'maintenance') loadBackups(); if (view === 'addons') loadAddons(); }, [view, selectedRealm, loadSettings, loadLogs, loadBackups, loadAddons]);
+  useEffect(() => { if (['bots', 'queues', 'world'].includes(view)) loadSettings(selectedRealm); if (view === 'logs') loadLogs(); if (view === 'maintenance') loadBackups(); if (view === 'addons') loadAddons(); if (view === 'party') loadPartyStatus(); }, [view, selectedRealm, loadSettings, loadLogs, loadBackups, loadAddons, loadPartyStatus]);
+  useEffect(() => { localStorage.setItem('azeroth-control-party', JSON.stringify(party)); }, [party]);
   useEffect(() => { if (status.realm) setSelectedRealm(status.realm); }, [status.realm]);
   useEffect(() => { window.azerothDesktop?.getState().then(setDesktopState); }, []);
   useEffect(() => {
@@ -132,6 +171,16 @@ export default function Home() {
     try { const result = await window.azerothDesktop?.openSteamInput(); if (result) setNotice(`Opening Steam Input for ${result.shortcutName}.`); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to open Steam Input'); }
   }
+  async function installControllerPreset() {
+    setAddonBusy('ffxiv-controller'); setError(''); setNotice('');
+    try {
+      const next = await window.azerothDesktop?.installControllerPreset();
+      if (next) setAddons(next);
+      setNotice('FFXIV controller preset prepared. In Steam Input choose Templates → Azeroth FFXIV Crossbar → Apply Layout. The in-game crossbar applies on your next login.');
+      if (next?.steamInput.found) await window.azerothDesktop?.openSteamInput();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to install the controller preset'); }
+    finally { setAddonBusy(null); }
+  }
   async function saveSettings() {
     if (!settings) return;
     setSaving(true); setError(''); setNotice('');
@@ -163,42 +212,111 @@ export default function Home() {
     try { const result = await api<{ message: string }>('/api/restore', { method: 'POST', body: JSON.stringify({ backupId: restoreTarget.id }) }); setNotice(result.message); setRestoreTarget(null); refresh(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to restore backup'); setRestoreTarget(null); }
   }
+  function partyClassesForRole(role: PartyRole) { return partyClasses.filter((profile) => profile.specs.some((spec) => spec.role === role)); }
+  function changePartyRole(index: number, role: PartyRole) {
+    const profile = partyClassesForRole(role)[0];
+    const spec = profile.specs.find((entry) => entry.role === role)!;
+    setParty((current) => current.map((slot, slotIndex) => slotIndex === index ? { role, classId: profile.id, specId: spec.id } : slot));
+    setPartyResult(null);
+  }
+  function changePartyClass(index: number, classId: number) {
+    setParty((current) => current.map((slot, slotIndex) => {
+      if (slotIndex !== index) return slot;
+      const profile = partyClasses.find((entry) => entry.id === classId)!;
+      const spec = profile.specs.find((entry) => entry.role === slot.role)!;
+      return { ...slot, classId, specId: spec.id };
+    }));
+    setPartyResult(null);
+  }
+  function changePartySpec(index: number, specId: number) {
+    setParty((current) => current.map((slot, slotIndex) => slotIndex === index ? { ...slot, specId } : slot));
+    setPartyResult(null);
+  }
+  async function buildParty() {
+    setPartyBusy(true); setError(''); setNotice(''); setPartyResult(null);
+    try {
+      const result = await api<PartyResult>('/api/party/build', { method: 'POST', body: JSON.stringify({ leader: partyLeader, slots: party }) });
+      setPartyResult(result); setNotice(result.message); await loadPartyStatus();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to prepare the party'); }
+    finally { setPartyBusy(false); }
+  }
   function RealmPicker() { return <div className="realm-tabs">{availableRealms.map((realm) => <button key={realm} className={selectedRealm === realm ? 'active' : ''} onClick={() => setSelectedRealm(realm)}>{realmInfo[realm].name}</button>)}</div>; }
 
   function Dashboard() { const online = status.state === 'online'; return <>
     <section className={`server-card ${online ? '' : 'offline'}`}><div className="server-glow" /><div className="server-copy"><div className="status-line"><span className="pulse" /> SERVER {online ? 'ONLINE' : 'OFFLINE'}</div><h2>{status.realmName}</h2><p>{online ? 'Authentication, world server and database are running.' : 'The server is not running.'}</p><div className="server-meta"><span>Uptime <strong>{status.uptime}</strong></span><span>Port <strong>{status.port}</strong></span><span>Build <strong>3.3.5a</strong></span></div></div><div className="server-controls">{online ? <><button className="danger-button" disabled={status.job.running} onClick={() => action('stop', status.realm)}>Stop Server</button><button className="ghost-button" disabled={status.job.running} onClick={() => action('restart', status.realm)}>Restart</button></> : <button className="primary-button" disabled={status.job.running} onClick={() => action('start', selectedRealm)}>Start Server</button>}</div></section>
     <section className="stats-grid"><article className="stat-card"><span>Online bots</span><strong>{status.bots.toLocaleString('en-US')}</strong><small>Active playerbots</small></article><article className="stat-card"><span>Active realm</span><strong>{realmInfo[status.realm].name}</strong><small>Port {status.port}</small></article><article className="stat-card"><span>Server CPU</span><strong>{status.cpu}</strong><small>Worldserver container</small></article><article className="stat-card"><span>Memory</span><strong>{status.memory}</strong><small>Worldserver container</small></article></section>
     <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK SELECT</p><h3>Installed realms</h3></div><button className="text-button" onClick={() => navigate('realms')}>Manage</button></div><div className="realm-list">{availableRealms.map((realm) => <button className={`realm-row ${status.realm === realm && online ? 'selected' : ''}`} key={realm} onClick={() => action(status.realm === realm && online ? 'restart' : 'start', realm)}><span className="realm-symbol">{status.realm === realm && online ? '◆' : '◇'}</span><span><strong>{realmInfo[realm].name}</strong><small>{realmInfo[realm].detail} · configured on this server</small></span><span className="realm-action">{status.realm === realm && online ? 'Restart' : 'Start'}</span></button>)}</div></section>
-    <section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK CONTROLS</p><h3>Game & queues</h3></div><span className="gamepad-hint">START</span></div><p className="panel-description">Launch the HD client or open the controls for dungeon and battleground bot queues.</p><div className="quick-actions"><button data-gamepad-launch-wow="true" className="primary-button" onClick={launchWoW}>▶ Launch WoW-HD</button><button className="ghost-button" onClick={() => navigate('queues')}>Queue Settings</button><button className="ghost-button" onClick={() => navigate('logs')}>World Log</button></div></section></div>
+    <section className="panel"><div className="panel-head"><div><p className="eyebrow">QUICK CONTROLS</p><h3>Game & party</h3></div><span className="gamepad-hint">START</span></div><p className="panel-description">Launch the HD client, prepare a complete party or adjust dungeon and battleground queues.</p><div className="quick-actions"><button data-gamepad-launch-wow="true" className="primary-button" onClick={launchWoW}>▶ Launch WoW-HD</button><button className="ghost-button party-dashboard-button" onClick={() => navigate('party')}>♜ Build & Summon Party</button><button className="ghost-button" onClick={() => navigate('queues')}>Queue Settings</button><button className="ghost-button" onClick={() => navigate('logs')}>World Log</button></div></section></div>
     <footer className="activity"><span className="activity-icon">{status.job.running ? '…' : '✓'}</span><p><strong>{status.job.running ? status.job.label : 'System ready'}</strong><small>{status.job.running ? 'This may take several minutes.' : `${realmInfo[status.realm].name} · ${status.uptime}`}</small></p><button className="text-button" onClick={() => navigate('logs')}>Open Log</button></footer>
   </>; }
   function Realms() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">SERVER PROFILES</p><h2>Realms</h2><p>Switch the entire local server to another profile with one click.</p></div></div><div className="realm-cards">{availableRealms.map((realm) => <article key={realm} className={status.realm === realm && status.state === 'online' ? 'active' : ''}><span className="realm-card-icon">{realm === 'progression' ? 'Ⅰ' : realm === 'endgame' ? 'Ⅷ' : 'Q'}</span><p className="eyebrow">{status.realm === realm && status.state === 'online' ? 'CURRENTLY ACTIVE' : 'REALM PROFILE'}</p><h3>{realmInfo[realm].name}</h3><p>{realmInfo[realm].detail}<br />{realmInfo[realm].bots} configured bots</p><button className={status.realm === realm && status.state === 'online' ? 'ghost-button' : 'primary-button'} onClick={() => action(status.realm === realm && status.state === 'online' ? 'restart' : 'start', realm)}>{status.realm === realm && status.state === 'online' ? 'Restart' : 'Start'}</button></article>)}</div><div className="installed-heading"><div><p className="eyebrow">LOCAL INSTALLATIONS</p><h2>Servers</h2></div><button className="ghost-button" onClick={async () => { await window.azerothDesktop?.resetOnboarding(); await window.azerothDesktop?.restartApp(); }}>Add Server</button></div><div className="installation-list">{desktopState.installations.map((server) => <article key={server.id} className={server.id === desktopState.activeInstallationId ? 'active' : ''}><div><strong>{server.name}</strong><small>{server.imported ? 'Imported — files stay untouched' : 'Managed by Azeroth Control'}</small><code>{server.path}</code></div><div className="installation-actions">{server.id !== desktopState.activeInstallationId && <button className="ghost-button" onClick={() => selectServer(server.id)}>Use Server</button>}<button className="danger-button" onClick={() => setDeleteTarget(server)}>{server.imported ? 'Forget' : 'Delete'}</button></div></article>)}</div></section>; }
   function Bots() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">PLAYERBOTS</p><h2>Bot Population</h2><p>Changes are safely written to the selected realm configuration.</p></div><RealmPicker /></div>{settings && <div className="settings-grid"><NumberSetting title="Online bot count" note="Up to 1,000 recommended for this machine" value={settings.botCount} min={0} max={2000} step={50} onChange={(v) => update('botCount', v)} /><SwitchSetting title="Level bracket distribution" note="Keeps bots across all level ranges" checked={settings.levelBrackets} onChange={(v) => update('levelBrackets', v)} /><SwitchSetting title="Follow player level" note="Moves more bots into your current bracket" checked={settings.dynamicBrackets} onChange={(v) => update('dynamicBrackets', v)} /><SwitchSetting title="Synchronize factions" note="Alliance and Horde use the same level range" checked={settings.syncFactions} onChange={(v) => update('syncFactions', v)} /><NumberSetting title="Player tracking weight" note="10–15 creates a denser world around you" value={settings.playerWeight} min={0} max={30} step={1} onChange={(v) => update('playerWeight', v)} /></div>}<SaveBar saving={saving} onSave={saveSettings} onRestart={() => action('restart', selectedRealm)} /></section>; }
   function Queues() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">DUNGEON FINDER & PVP</p><h2>Queue Controls</h2><p>Built-in playerbot queue manager settings.</p></div><RealmPicker /></div>{settings && <div className="settings-grid"><SwitchSetting title="Dungeon bots" note="Bots react to a human LFG queue" checked={settings.joinLfg} onChange={(v) => update('joinLfg', v)} /><SwitchSetting title="Battleground bots" note="Bots can fill an active BG queue" checked={settings.joinBg} onChange={(v) => update('joinBg', v)} /><SwitchSetting title="Automatic BG queue" note="Required by the current playerbots BG behavior" checked={settings.autoJoinBg} onChange={(v) => update('autoJoinBg', v)} /><SwitchSetting title="Dungeon deserter" note="Apply a penalty for leaving early" checked={settings.dungeonDeserter} onChange={(v) => update('dungeonDeserter', v)} /><SwitchSetting title="BG deserter" note="Apply a penalty for leaving early" checked={settings.bgDeserter} onChange={(v) => update('bgDeserter', v)} /></div>}<div className="info-banner"><strong>Instant reserve queue</strong><span>The server component that prepares exact roles, levels and gear is not enabled yet. These controls use the reliable built-in playerbots system.</span></div><SaveBar saving={saving} onSave={saveSettings} onRestart={() => action('restart', selectedRealm)} /></section>; }
-  function Party() { const classes = ['Warrior', 'Paladin', 'Druid', 'Priest', 'Shaman', 'Mage', 'Rogue', 'Hunter', 'Warlock', 'Death Knight']; return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">MY PARTY</p><h2>Party Builder</h2><p>Prepare and save a preferred five-player group for quick summoning later.</p></div></div><div className="party-list"><div className="party-player"><span className="avatar">YOU</span><span><strong>Your character</strong><small>Party leader · uses your current level</small></span></div>{party.map((slot, index) => <div className="party-slot" key={index}><span className={`role-gem role-${slot.role.toLowerCase()}`}>{index + 2}</span><select value={slot.role} onChange={(e) => setParty((p) => p.map((s, i) => i === index ? { ...s, role: e.target.value } : s))}><option>Tank</option><option>Healer</option><option>DPS</option></select><select value={slot.className} onChange={(e) => setParty((p) => p.map((s, i) => i === index ? { ...s, className: e.target.value } : s))}>{classes.map((name) => <option key={name}>{name}</option>)}</select><input value={slot.spec} onChange={(e) => setParty((p) => p.map((s, i) => i === index ? { ...s, spec: e.target.value } : s))} aria-label={`Spec for slot ${index + 2}`} /></div>)}</div><div className="info-banner"><strong>Preset saved for this local session</strong><span>Summoning and automatic gearing will require a reserve-bot bridge; the current server does not expose a safe API for it.</span></div></section>; }
+  function Party() {
+    const selectedPlayer = partyStatus.players.find((player) => player.name === partyLeader);
+    const connected = partyStatus.bridgeReady && partyStatus.serverOnline && Boolean(selectedPlayer);
+    const canBuild = connected && !partyBusy;
+    return <section className="page-panel party-builder-page">
+      <div className="section-title"><div><p className="eyebrow">MY PARTY</p><h2>Party Builder</h2><p>Create, level, equip and summon a complete five-player party in one action.</p></div><div className="party-title-actions"><button className="ghost-button" disabled={partyBusy} onClick={loadPartyStatus}>Refresh Players</button><button className="primary-button" disabled={!canBuild} onClick={buildParty}>{partyBusy ? 'Preparing…' : '♜ Build & Summon Party'}</button></div></div>
+      <div className={`party-connection ${connected ? 'ready' : ''}`}>
+        <span className="party-connection-light" />
+        <div><strong>{partyStatus.serverOnline ? partyStatus.bridgeReady ? 'Party Bridge ready' : 'Party Bridge update required' : 'Server is offline'}</strong><small>{partyStatus.bridgeReady ? `Local bridge v${partyStatus.bridgeVersion} · no public network port` : 'Start or update this managed server before building a party.'}</small></div>
+        <label><span>Online character</span><select value={partyLeader} disabled={partyBusy || !partyStatus.players.length} onChange={(event) => { setPartyLeader(event.target.value); setPartyResult(null); }}><option value="">{partyStatus.players.length ? 'Select character' : 'Log into WoW first'}</option>{partyStatus.players.map((player) => <option value={player.name} key={player.name}>{player.name} · Level {player.level}</option>)}</select></label>
+      </div>
+      <div className="party-flow" aria-label="Party preparation steps">
+        <span><b>1</b>Select free bots</span><span><b>2</b>Join party</span><span><b>3</b>Match level</span><span><b>4</b>Gear + spells</span><span><b>5</b>Summon</span>
+      </div>
+      <div className="party-list">
+        <div className="party-player"><span className="avatar">YOU</span><span><strong>{selectedPlayer?.name || 'Your character'}</strong><small>{selectedPlayer ? `Party leader · level ${selectedPlayer.level}` : 'Log into the world, then refresh players'}</small></span></div>
+        {party.map((slot, index) => {
+          const profiles = partyClassesForRole(slot.role);
+          const profile = partyClasses.find((entry) => entry.id === slot.classId) || profiles[0];
+          const specs = profile.specs.filter((entry) => entry.role === slot.role);
+          return <div className="party-slot" key={index}>
+            <span className={`role-gem role-${slot.role.toLowerCase()}`}>{index + 2}</span>
+            <select aria-label={`Role for slot ${index + 2}`} value={slot.role} disabled={partyBusy} onChange={(event) => changePartyRole(index, event.target.value as PartyRole)}><option>Tank</option><option>Healer</option><option>DPS</option></select>
+            <select aria-label={`Class for slot ${index + 2}`} value={profile.id} disabled={partyBusy} onChange={(event) => changePartyClass(index, Number(event.target.value))}>{profiles.map((entry) => <option value={entry.id} key={entry.id} disabled={entry.id === 6 && Boolean(selectedPlayer && selectedPlayer.level < 55)}>{entry.name}{entry.id === 6 && selectedPlayer && selectedPlayer.level < 55 ? ' · level 55+' : ''}</option>)}</select>
+            <select aria-label={`Specialization for slot ${index + 2}`} value={slot.specId} disabled={partyBusy} onChange={(event) => changePartySpec(index, Number(event.target.value))}>{specs.map((spec) => <option value={spec.id} key={spec.id}>{spec.name}</option>)}</select>
+          </div>;
+        })}
+      </div>
+      <section className="party-build-action">
+        <div><p className="eyebrow">ONE-CLICK PARTY</p><h3>{partyBusy ? 'Preparing your party…' : 'Build, Prepare & Summon'}</h3><p>{partyBusy ? 'PlayerBots is generating level-appropriate talents, spellbooks and equipment. Keep WoW open.' : 'Replaces an existing bot-only party. Human groups, combat, queues and battlegrounds are left untouched.'}</p></div>
+        <button className="primary-button party-build-button" disabled={!canBuild} onClick={buildParty}>{partyBusy ? <><span className="button-spinner" /> Preparing bots…</> : <>♜ Build & Summon Party</>}</button>
+      </section>
+      {partyResult && <section className="party-result"><div><span>✓</span><strong>Party ready at level {partyResult.level}</strong><small>Joined, geared, trained and summoned to {partyResult.leader}</small></div><div className="prepared-bots">{partyResult.bots.map((bot) => <article key={bot.name}><b>{bot.name}</b><span>{bot.className} · {bot.spec}</span></article>)}</div></section>}
+      {!partyStatus.players.length && partyStatus.serverOnline && <div className="info-banner"><strong>Log into your character first</strong><span>Party Builder detects the online non-bot character and performs all changes while it is safely present in the world.</span></div>}
+    </section>;
+  }
   function World() { return <section className="page-panel"><div className="section-title"><div><p className="eyebrow">REALM CONFIG</p><h2>World Settings</h2><p>Common quality-of-life and rate controls without editing files.</p></div><RealmPicker /></div>{settings && <><div className="rate-grid"><NumberSetting title="XP Rate" note="Kill, quest and exploration XP" value={settings.xpRate} min={0} max={20} step={0.5} suffix="×" onChange={(v) => update('xpRate', v)} /><NumberSetting title="Item Drop Rate" note="All item quality tiers" value={settings.dropRate} min={0} max={20} step={0.5} suffix="×" onChange={(v) => update('dropRate', v)} /><NumberSetting title="Creature Spawn Speed" note="Higher means creatures return faster" value={settings.spawnRate} min={0.25} max={20} step={0.25} suffix="×" onChange={(v) => update('spawnRate', v)} /></div><div className="settings-grid"><SwitchSetting title="AoE looting" note="Loot nearby creatures at once" checked={settings.aoeLoot} onChange={(v) => update('aoeLoot', v)} /><NumberSetting title="AoE loot range" note="Range in yards" value={settings.aoeLootRange} min={1} max={100} step={1} onChange={(v) => update('aoeLootRange', v)} /></div></>}<SaveBar saving={saving} onSave={saveSettings} onRestart={() => action('restart', selectedRealm)} /></section>; }
   function Addons() {
-    const consolePortInstalled = Boolean(addons?.addons.find((addon) => addon.id === 'consoleportlk')?.installed);
     return <section className="page-panel addons-page">
       <div className="section-title"><div><p className="eyebrow">WOW 3.3.5A CLIENT</p><h2>Addon Library</h2><p>Verified releases are downloaded from their original GitHub projects and installed into your active client.</p></div><button className="ghost-button" onClick={loadAddons}>Refresh</button></div>
       {addons && <>
         <div className="client-path-banner"><span>Active client</span><strong>{addons.clientPath}</strong><small>{addons.addonsPath}</small></div>
         <div className="addon-grid">{addons.addons.map((addon) => <article key={addon.id} className={addon.installed ? 'installed' : ''}><div className="addon-card-head"><span className="addon-glyph">{addon.category === 'Gamepad' ? '⌘' : '!'}</span><div><p className="eyebrow">{addon.category}</p><h3>{addon.name}</h3></div><span className={`addon-state ${addon.installed ? 'ready' : ''}`}>{addon.installed ? `Installed ${addon.installedVersion || ''}` : `v${addon.version}`}</span></div><p>{addon.description}</p><small>{addon.note}</small><div className="addon-actions"><button className="text-button" onClick={() => window.open(addon.sourceUrl, '_blank')}>Source</button><button className={addon.installed ? 'danger-button' : 'primary-button'} disabled={addonBusy !== null} onClick={() => changeAddon(addon)}>{addonBusy === addon.id ? 'Working…' : addon.installed ? 'Remove' : 'Install'}</button></div></article>)}</div>
-        {consolePortInstalled && <section className="steam-input-setup">
-          <div className="steam-input-head">
-            <div><p className="eyebrow">RECOMMENDED CONTROLLER SETUP</p><h3>Steam Input for ConsolePortLK</h3><p>Native SteamOS mapping with no helper program, Windows runtime or shared Proton prefix.</p></div>
-            <span className={`steam-shortcut-badge ${addons.steamInput.found ? 'found' : ''}`}>{addons.steamInput.found ? addons.steamInput.shortcutName : 'Steam entry not found'}</span>
+        <section className={`controller-preset ${addons.controllerPreset.installed ? 'installed' : ''}`}>
+          <div className="controller-preset-head">
+            <div><p className="eyebrow">ONE-CLICK CONTROLLER SETUP</p><h3>FFXIV-style Crossbar</h3><p>Installs ConsolePortLK when needed, a safe in-game preset and local Steam Input templates for common controllers.</p></div>
+            <span className={`steam-shortcut-badge ${addons.controllerPreset.installed ? 'found' : ''}`}>{addons.controllerPreset.installed ? `Prepared v${addons.controllerPreset.version}` : 'Optional preset'}</span>
           </div>
-          <div className="steam-input-steps">
-            <article><span className="steam-step-number">1</span><div><strong>Name the WoW Steam entry</strong><small>Use <code>World of Warcraft: WotLK</code> so the community layout is easy to find.</small></div></article>
-            <article><span className="steam-step-number">2</span><div><strong>Browse Community Layouts</strong><small>Open Controller Settings, choose Community Layouts and select Show All Layouts.</small></div></article>
-            <article><span className="steam-step-number">3</span><div><strong>Apply the ConsolePort layout</strong><small>Choose <code>Gamepad leoaviana ConsolePortLK</code> by Prrg, then apply it.</small></div></article>
+          <div className="controller-binding-grid">
+            <article><kbd>L2</kbd><span><strong>Skill bank 1</strong><small>D-pad + ABXY · slots 1–8</small></span></article>
+            <article><kbd>R2</kbd><span><strong>Skill bank 2</strong><small>D-pad + ABXY · slots 9–16</small></span></article>
+            <article><kbd>L1</kbd><span><strong>Target enemy</strong><small>Hold + D-pad to zoom</small></span></article>
+            <article><kbd>X</kbd><span><strong>World map</strong><small>Becomes a skill with L2/R2</small></span></article>
+            <article><kbd>A</kbd><span><strong>Interact</strong><small>Target or cursor fallback</small></span></article>
+            <article><kbd>Y</kbd><span><strong>Jump</strong><small>Becomes a skill with L2/R2</small></span></article>
+            <article><kbd>B</kbd><span><strong>Back / close</strong><small>Becomes a skill with L2/R2</small></span></article>
+            <article><kbd>R1</kbd><span><strong>Utility ring</strong><small>Mounts, items and utility</small></span></article>
           </div>
+          <div className="preset-safety-note"><strong>Safe and reversible</strong><span>A full WTF copy is saved before setup. In game, <code>/affxiv restore</code> restores the previous ConsolePort settings for that character.</span></div>
           <div className="steam-input-actions">
-            <p>Azeroth Control opens the correct non-Steam game settings. Steam keeps ownership of your controller layout.</p>
-            <button className="primary-button large" disabled={!addons.steamInput.found} onClick={openSteamInput}>Open Steam Input</button>
+            <p>{addons.controllerPreset.installed ? `${addons.controllerPreset.steamTemplatesInstalled}/${addons.controllerPreset.steamTemplatesExpected} controller templates installed. Apply “${addons.controllerPreset.steamTemplateName}” once in Steam Input.` : 'Steam requires the final Apply Layout confirmation; Azeroth Control does not silently overwrite controller-cloud data.'}</p>
+            {addons.controllerPreset.installed && <button className="ghost-button large" disabled={!addons.steamInput.found} onClick={openSteamInput}>Open Steam Input</button>}
+            <button className="primary-button large" disabled={addonBusy !== null} onClick={installControllerPreset}>{addonBusy === 'ffxiv-controller' ? 'Preparing…' : addons.controllerPreset.installed ? 'Repair & Open' : 'Install & Open Steam Input'}</button>
           </div>
-        </section>}
+        </section>
         <div className="info-banner"><strong>Safe addon changes</strong><span>Existing folders are moved to Interface/.azeroth-control-backups before replacement or removal. Azeroth Control never bundles third-party addons inside its AppImage.</span></div>
       </>}
     </section>;

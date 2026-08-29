@@ -17,6 +17,14 @@ let gameChild;
 
 const addonCatalog = [
   {
+    id: 'azeroth-dungeon-guide', name: 'Azeroth Dungeon Guide', version: '0.1.0', category: 'Gamepad',
+    description: 'A large, controller-friendly run selector that appears when you enter a dungeon.',
+    note: 'Choose Dynamic, Fast, Careful or Manual control for the Dungeon Clear tank bot.',
+    sourceUrl: 'https://github.com/raanh/azeroth-control',
+    bundledFolder: 'AzerothDungeonGuide',
+    folders: ['AzerothDungeonGuide'],
+  },
+  {
     id: 'consoleportlk', name: 'ConsolePortLK', version: '1.5.0-rc2', category: 'Gamepad',
     description: 'Controller-first action bars, menus and navigation for WoW 3.3.5a.',
     note: 'Recommended for Gaming Mode. Pair it with the Gamepad leoaviana ConsolePortLK Steam Input layout.',
@@ -34,6 +42,27 @@ const addonCatalog = [
     sha256: '621bf504c43da8d7e34c06b48aeb7dd85cb45b568d0f6a8630a7cfea4143f65f',
     folders: ['Questie-X'],
   },
+  {
+    id: 'refined-blizz-plates', name: 'RefinedBlizzPlates', version: '1.11.2', category: 'Interface',
+    description: 'Modern, readable Blizzard-style nameplates tuned for the WotLK 3.3.5a client.',
+    note: 'Verified official release. Configure it in-game after restarting WoW.',
+    sourceUrl: 'https://github.com/KhalGH/RefinedBlizzPlates-WotLK',
+    downloadUrl: 'https://github.com/KhalGH/RefinedBlizzPlates-WotLK/releases/download/v1.11.2/RefinedBlizzPlates-v1.11.2.zip',
+    sha256: '5f5eb1527a997a6e0439966910ec9ea506b577240c0c0e1a0b0e5c2f915ba39a',
+    folders: ['!!RefinedBlizzPlates'],
+  },
+];
+
+const controllerPresetVersion = '0.1.0';
+const controllerPresetFolder = 'AzerothFFXIVController';
+const controllerTemplateTypes = [
+  'controller_neptune',
+  'controller_xboxone',
+  'controller_xbox360',
+  'controller_ps4',
+  'controller_ps5',
+  'controller_switch_pro',
+  'controller_generic',
 ];
 
 const resources = () => app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..');
@@ -52,7 +81,7 @@ function syncManagedScripts() {
   for (const managedPath of managedServerPaths()) {
     const bin = path.join(managedPath, 'bin');
     if (!fs.existsSync(bin)) continue;
-    for (const [sourceName, targetName] of [['server-control-managed', 'server-control'], ['launch-wow-managed', 'launch-wow']]) {
+    for (const [sourceName, targetName] of [['server-control-managed', 'server-control'], ['launch-wow-managed', 'launch-wow'], ['autologin-managed', 'autologin']]) {
       const source = path.join(resources(), 'scripts', sourceName);
       const target = path.join(bin, targetName);
       if (!fs.existsSync(source)) continue;
@@ -191,6 +220,9 @@ function addonState() {
   const addonsPath = path.join(clientPath, 'Interface', 'AddOns');
   const recordsPath = path.join(clientPath, 'Interface', '.azeroth-control-addons.json');
   const records = readJson(recordsPath, {});
+  const presetAddon = path.join(addonsPath, controllerPresetFolder);
+  const steamTemplatesRoot = path.join(os.homedir(), '.local', 'share', 'Steam', 'controller_base', 'templates');
+  const installedTemplates = controllerTemplateTypes.filter((type) => fs.existsSync(path.join(steamTemplatesRoot, `${type}_azeroth_ffxiv.vdf`)));
   return {
     clientPath,
     addonsPath,
@@ -204,6 +236,16 @@ function addonState() {
       installed: addon.folders.every((folder) => fs.existsSync(path.join(addonsPath, folder))),
       installedVersion: records[addon.id]?.version || null,
     })),
+    controllerPreset: {
+      version: controllerPresetVersion,
+      installed: fs.existsSync(path.join(presetAddon, 'AzerothFFXIVController.toc')) && installedTemplates.length > 0,
+      addonInstalled: fs.existsSync(path.join(presetAddon, 'AzerothFFXIVController.toc')),
+      steamTemplatesInstalled: installedTemplates.length,
+      steamTemplatesExpected: controllerTemplateTypes.length,
+      steamTemplateName: 'Azeroth FFXIV Crossbar',
+      backupPath: records['ffxiv-controller']?.backupPath || '',
+      installedAt: records['ffxiv-controller']?.installedAt || '',
+    },
   };
 }
 function validateZipEntries(archive) {
@@ -218,6 +260,26 @@ async function installAddon(addonId) {
   const addon = addonCatalog.find((item) => item.id === addonId);
   if (!addon) throw new Error('Unknown addon.');
   const { clientPath, addonsPath } = addonState();
+  if (addon.bundledFolder) {
+    const sourceRoot = path.join(resources(), 'resources', 'addons');
+    const source = path.join(sourceRoot, addon.bundledFolder);
+    if (!fs.existsSync(path.join(source, `${addon.bundledFolder}.toc`))) throw new Error('The packaged addon is incomplete.');
+    const backupRoot = path.join(clientPath, 'Interface', '.azeroth-control-backups', `${addon.id}-${Date.now()}`);
+    fs.mkdirSync(addonsPath, { recursive: true });
+    for (const folder of addon.folders) {
+      const target = path.join(addonsPath, folder);
+      if (fs.existsSync(target)) {
+        fs.mkdirSync(backupRoot, { recursive: true });
+        fs.renameSync(target, path.join(backupRoot, folder));
+      }
+      fs.cpSync(path.join(sourceRoot, folder), target, { recursive: true, force: false });
+    }
+    const recordsPath = path.join(clientPath, 'Interface', '.azeroth-control-addons.json');
+    const records = readJson(recordsPath, {});
+    records[addon.id] = { version: addon.version, installedAt: new Date().toISOString(), folders: addon.folders };
+    writeJson(recordsPath, records);
+    return addonState();
+  }
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'azeroth-addon-'));
   try {
     const response = await fetch(addon.downloadUrl, { redirect: 'follow' });
@@ -268,6 +330,63 @@ function removeAddon(addonId) {
   const recordsPath = path.join(clientPath, 'Interface', '.azeroth-control-addons.json');
   const records = readJson(recordsPath, {});
   delete records[addon.id];
+  writeJson(recordsPath, records);
+  return addonState();
+}
+
+async function installControllerPreset() {
+  let state = addonState();
+  if (!state.addons.find((addon) => addon.id === 'consoleportlk')?.installed) {
+    state = await installAddon('consoleportlk');
+  }
+
+  const { clientPath, addonsPath } = state;
+  const sourceAddon = path.join(resources(), 'resources', 'addons', controllerPresetFolder);
+  const sourceTemplate = path.join(resources(), 'resources', 'controller', 'azeroth_ffxiv_crossbar.vdf.in');
+  if (!fs.existsSync(path.join(sourceAddon, 'AzerothFFXIVController.toc')) || !fs.existsSync(sourceTemplate)) {
+    throw new Error('The packaged FFXIV controller preset is incomplete.');
+  }
+
+  const installedAt = new Date().toISOString();
+  const generation = `${Date.now()}`;
+  const backupRoot = path.join(clientPath, 'Interface', '.azeroth-control-backups', `ffxiv-controller-${generation}`);
+  const targetAddon = path.join(addonsPath, controllerPresetFolder);
+  const wtfPath = path.join(clientPath, 'WTF');
+  if (fs.existsSync(targetAddon) || fs.existsSync(wtfPath)) fs.mkdirSync(backupRoot, { recursive: true });
+  if (fs.existsSync(targetAddon)) fs.renameSync(targetAddon, path.join(backupRoot, controllerPresetFolder));
+  if (fs.existsSync(wtfPath)) fs.cpSync(wtfPath, path.join(backupRoot, 'WTF'), { recursive: true, force: false });
+
+  fs.mkdirSync(addonsPath, { recursive: true });
+  fs.cpSync(sourceAddon, targetAddon, { recursive: true, force: false });
+  fs.writeFileSync(path.join(targetAddon, 'Generation.lua'), `AZEROTH_FFXIV_PRESET_GENERATION = ${JSON.stringify(generation)}\n`);
+
+  const templateBody = fs.readFileSync(sourceTemplate, 'utf8');
+  const steamTemplatesRoot = path.join(os.homedir(), '.local', 'share', 'Steam', 'controller_base', 'templates');
+  let installedTemplates = 0;
+  if (fs.existsSync(path.dirname(steamTemplatesRoot))) {
+    fs.mkdirSync(steamTemplatesRoot, { recursive: true });
+    const steamBackup = path.join(backupRoot, 'steam-input-templates');
+    for (const type of controllerTemplateTypes) {
+      const target = path.join(steamTemplatesRoot, `${type}_azeroth_ffxiv.vdf`);
+      if (fs.existsSync(target)) {
+        fs.mkdirSync(steamBackup, { recursive: true });
+        fs.copyFileSync(target, path.join(steamBackup, path.basename(target)));
+      }
+      fs.writeFileSync(target, templateBody.replaceAll('__CONTROLLER_TYPE__', type));
+      installedTemplates += 1;
+    }
+  }
+
+  const recordsPath = path.join(clientPath, 'Interface', '.azeroth-control-addons.json');
+  const records = readJson(recordsPath, {});
+  records['ffxiv-controller'] = {
+    version: controllerPresetVersion,
+    installedAt,
+    generation,
+    folder: controllerPresetFolder,
+    backupPath: fs.existsSync(backupRoot) ? backupRoot : '',
+    steamTemplates: installedTemplates,
+  };
   writeJson(recordsPath, records);
   return addonState();
 }
@@ -455,6 +574,11 @@ ipcMain.handle('game-launch', async () => {
     const steamGameId = (BigInt(steamShortcut.appid) << 32n) | 0x02000000n;
     const child = spawn('steam', ['-ifrunning', `steam://rungameid/${steamGameId}`], { detached: true, stdio: 'ignore' });
     child.unref();
+    const autologin = path.join(activeRoot(), 'bin', 'autologin');
+    if (fs.existsSync(autologin)) {
+      const loginChild = spawn(autologin, [], { detached: true, stdio: 'ignore', env: { ...process.env } });
+      loginChild.unref();
+    }
     return { ok: true, message: `Launching ${steamShortcut.AppName || 'WoW-HD'} through Steam.` };
   }
   if (gameChild && gameChild.exitCode === null) return { ok: true, message: 'WoW is already running.' };
@@ -494,6 +618,7 @@ ipcMain.handle('steam-input-open', () => {
 });
 ipcMain.handle('addon-install', (_event, addonId) => installAddon(addonId));
 ipcMain.handle('addon-remove', (_event, addonId) => removeAddon(addonId));
+ipcMain.handle('controller-preset-install', () => installControllerPreset());
 ipcMain.handle('installations-detect', () => detectInstallations());
 ipcMain.handle('installation-import', (_event, installPath) => {
   const canonical = fs.realpathSync(installPath);

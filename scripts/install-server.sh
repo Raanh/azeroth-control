@@ -40,6 +40,7 @@ SERVER_NAME="$(json_optional serverName)"
 ACCOUNT_NAME="$(json_optional accountName)"
 ACCOUNT_PASSWORD="$(json_optional accountPassword)"
 ADMIN_ACCOUNT="$(json_optional adminAccount)"
+AUTO_LOGIN="$(json_optional autoLogin)"
 SERVER_ID="${SERVER_ID:-default}"
 if [[ ! "$SERVER_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$ ]]; then
     printf 'Invalid server identifier: %s\n' "$SERVER_ID" >&2
@@ -106,6 +107,26 @@ else
     printf '[2/6] Modules already present; resuming.\n'
 fi
 
+# Party Builder is backed by a small, local-only world-console command module.
+# It is part of Azeroth Control itself (not a downloadable third-party module),
+# so every managed server gets the same safe bridge implementation.
+PARTY_BRIDGE_SOURCE="$SCRIPT_DIR/../resources/modules/mod-azeroth-control-bridge"
+PARTY_BRIDGE_TARGET="$CORE/modules/mod-azeroth-control-bridge"
+PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$PARTY_BRIDGE_SOURCE/VERSION")"
+INSTALLED_PARTY_BRIDGE_VERSION=""
+if [[ -f "$SERVER_ROOT/state/party-bridge-version" ]]; then
+    INSTALLED_PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$SERVER_ROOT/state/party-bridge-version")"
+fi
+if [[ "$INSTALLED_PARTY_BRIDGE_VERSION" != "$PARTY_BRIDGE_VERSION" ]]; then
+    mkdir -p "$PARTY_BRIDGE_TARGET"
+    cp -a "$PARTY_BRIDGE_SOURCE/." "$PARTY_BRIDGE_TARGET/"
+    # A resumed installation with an older compiled image must rebuild the
+    # worldserver once so the updated bridge is actually linked.
+    if [[ -f "$CHECKPOINTS/images" ]]; then
+        rm "$CHECKPOINTS/images"
+    fi
+fi
+
 # Buildah/Podman does not retain named ARG values in every child stage used by
 # AzerothCore's multi-stage Dockerfile. Numeric ownership keeps the image
 # non-root while avoiding late COPY failures after the expensive compilation.
@@ -149,6 +170,7 @@ DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
     printf 'CLIENT_PATH=%q\n' "$CLIENT_PATH"
     printf 'CLIENT_EXECUTABLE=%q\n' "$CLIENT_EXECUTABLE"
     printf 'STOP_WITH_GAME=%q\n' "$(json_value stopWithGame)"
+    printf 'AUTO_LOGIN=%q\n' "${AUTO_LOGIN:-0}"
     printf 'CONTAINER_PREFIX=%q\n' "$CONTAINER_PREFIX"
     printf 'DB_PASSWORD=%q\n' "$DB_PASSWORD"
     printf 'CHARACTER_DB=%q\n' acore_characters
@@ -161,7 +183,8 @@ DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
 printf '%s\n' "$CONTAINER_PREFIX" > "$SERVER_ROOT/state/container-prefix"
 cp "$SCRIPT_DIR/server-control-managed" "$SERVER_ROOT/bin/server-control"
 cp "$SCRIPT_DIR/launch-wow-managed" "$SERVER_ROOT/bin/launch-wow"
-chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/launch-wow"
+cp "$SCRIPT_DIR/autologin-managed" "$SERVER_ROOT/bin/autologin"
+chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/launch-wow" "$SERVER_ROOT/bin/autologin"
 mkdir -p "$CLIENT_PATH/WTF"
 CLIENT_CONFIG="$CLIENT_PATH/WTF/Config.wtf"
 if [[ -f "$CLIENT_CONFIG" && ! -f "$CLIENT_CONFIG.azeroth-control-backup" ]]; then
@@ -173,6 +196,27 @@ if grep -qi '^SET realmlist ' "$CLIENT_CONFIG"; then
 else
     printf 'SET realmlist "127.0.0.1"\n' >> "$CLIENT_CONFIG"
 fi
+if [[ -n "$ACCOUNT_NAME" ]]; then
+    if grep -qi '^SET accountName ' "$CLIENT_CONFIG"; then
+        sed -i 's/^SET accountName .*/SET accountName "'"${ACCOUNT_NAME^^}"'"/I' "$CLIENT_CONFIG"
+    else
+        printf 'SET accountName "%s"\n' "${ACCOUNT_NAME^^}" >> "$CLIENT_CONFIG"
+    fi
+fi
+AUTOLOGIN_FILE="$SERVER_ROOT/state/autologin.json"
+if [[ "$AUTO_LOGIN" == 1 || "$AUTO_LOGIN" == true ]]; then
+    python3 - "$AUTOLOGIN_FILE" "$ACCOUNT_NAME" "$ACCOUNT_PASSWORD" <<'PY'
+import json, os, sys
+target, account, password = sys.argv[1:4]
+temporary = target + ".tmp"
+with open(temporary, "w", encoding="utf-8") as output:
+    json.dump({"account": account.upper(), "password": password}, output)
+os.chmod(temporary, 0o600)
+os.replace(temporary, target)
+PY
+else
+    rm -f "$AUTOLOGIN_FILE"
+fi
 touch "$CHECKPOINTS/configuration"
 
 if [[ ! -f "$CHECKPOINTS/images" ]]; then
@@ -183,6 +227,7 @@ if [[ ! -f "$CHECKPOINTS/images" ]]; then
     podman build "${BUILD_ARGS[@]}" --target db-import -t "$IMPORT_IMAGE" "$CORE"
     podman build "${BUILD_ARGS[@]}" --target client-data -t "$DATA_IMAGE" "$CORE"
     touch "$CHECKPOINTS/images"
+    printf '%s\n' "$PARTY_BRIDGE_VERSION" > "$SERVER_ROOT/state/party-bridge-version"
 else
     printf '[4/6] Container images already exist; resuming.\n'
 fi

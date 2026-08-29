@@ -84,6 +84,10 @@
         "to": "manifests"
       },
       {
+        "from": "resources",
+        "to": "resources"
+      },
+      {
         "from": "scripts/install-server.sh",
         "to": "scripts/install-server.sh"
       },
@@ -94,6 +98,10 @@
       {
         "from": "scripts/launch-wow-managed",
         "to": "scripts/launch-wow-managed"
+      },
+      {
+        "from": "scripts/autologin-managed",
+        "to": "scripts/autologin-managed"
       },
       {
         "from": "LICENSE",

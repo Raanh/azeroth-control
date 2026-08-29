@@ -33,8 +33,9 @@ module authors.
   dependencies, and conflicts.
 - Validates a user-supplied WoW 3.3.5a client and safely configures its local
   realmlist.
-- Creates the first game account, optionally with administrator permissions,
-  and removes the account password from saved installation records afterward.
+- Creates the first game account, optionally with administrator permissions
+  and opt-in local autologin. Without autologin, the password is removed from
+  saved installation records afterward.
 - Builds the server, authentication service, databases, maps, and client data
   as rootless Podman containers.
 - Shows installation stages, elapsed/estimated time, CPU use, memory use, and a
@@ -63,6 +64,9 @@ module authors.
 - Control level-bracket distribution, dynamic player-level tracking, faction
   synchronization, and real-player weighting.
 - Enable or disable built-in Playerbots LFG and battleground participation.
+- Instantly prepares a level-matched tank/healer/DPS bot party when a solo
+  player joins Dungeon Finder, then lets the normal LFG role check and proposal
+  flow continue.
 - Configure automatic battleground joining and dungeon/BG deserter penalties.
 - Change XP, item drop, and creature respawn rates.
 - Enable and tune AoE looting when the matching server module is installed.
@@ -70,12 +74,23 @@ module authors.
 
 ### Client addon library and controller setup
 
-- Install or remove verified upstream releases of ConsolePortLK and Questie-X.
+- Install or remove verified upstream releases of ConsolePortLK, Questie-X and
+  RefinedBlizzPlates.
 - Verify addon downloads with SHA-256 before extraction.
 - Move replaced or removed addon folders into a recoverable local backup.
+- Install the bundled **Azeroth Dungeon Guide**, a large controller-friendly
+  Dynamic/Fast/Careful/Manual run selector shown when entering a dungeon.
 - Detect the active WoW Steam shortcut.
-- Open Steam Input for that exact shortcut and show the recommended
-  ConsolePortLK community-layout instructions.
+- Install the optional **Azeroth FFXIV Crossbar** preset, including:
+  - a controller-friendly triple crossbar for ConsolePortLK;
+  - L2, R2, and L2+R2 skill banks;
+  - L1 targeting and L1+D-pad camera zoom;
+  - map, interact, jump, back, and utility-ring face-button bindings;
+  - local Steam Input templates for Steam Deck, Xbox, PlayStation, Switch Pro,
+    and generic controllers.
+- Back up the full client `WTF` folder before applying the crossbar preset.
+- Open Steam Input for the exact WoW shortcut so the user can confirm the
+  local layout without Azeroth Control changing Steam Cloud controller data.
 
 ### TV and controller interface
 
@@ -159,8 +174,10 @@ service or require administrator access.
 3. **Modules** — keep the defaults for the simplest first test. AutoBalance and
    SoloCraft should not be enabled together.
 4. **Game Client** — select your own WoW 3.3.5a folder and create the first local
-   account. The client remains in its original location. Existing `Config.wtf`
-   is backed up before the realmlist is changed to `127.0.0.1`.
+   account. Optional autologin remembers the account and stores the password in
+   a local user-only file (mode 600) so it can be typed at launch. The client
+   remains in its original location. Existing `Config.wtf` is backed up before
+   the realmlist is changed to `127.0.0.1`.
 5. **Review** — confirm disk, estimated time, server behavior, and whether a WoW
    Steam entry should be created.
 6. **Install** — leave the device powered and connected. The CPU may remain near
@@ -169,18 +186,58 @@ service or require administrator access.
 7. When complete, open the dashboard and choose **Launch WoW-HD**. The server is
    started first if needed.
 
-## ConsolePortLK with Steam Input
+## Party Builder
 
-After installing ConsolePortLK from **Addons**:
+Party Builder creates a complete five-player group around an online character.
+Choose one tank, one healer and two DPS class/spec combinations, then select
+**Build & Summon Party**. Azeroth Control will:
 
-1. Name the WoW Steam entry `World of Warcraft: WotLK`.
-2. Select **Open Steam Input** in Azeroth Control.
-3. Open Community Layouts and enable **Show All Layouts**.
-4. Apply `Gamepad leoaviana ConsolePortLK` by Prrg.
+1. reserve four free, same-faction random PlayerBots;
+2. replace an existing bot-only party and add the selected bots;
+3. match every bot to the leader's current level;
+4. initialize class skills, spellbooks, a selected PvE talent template,
+   consumables and level-appropriate equipment; and
+5. summon the prepared party to the leader.
+
+The leader must be online and outside combat, flight, battlegrounds and active
+queues. Party Builder never replaces a group containing another human player
+or an LFG/BG group. Death Knight slots require a level 55 or higher leader.
+
+Managed servers include a small GPL-licensed Azeroth Control Bridge module. It
+accepts the narrow Party Builder command through the local worldserver console
+and observes solo Dungeon Finder join packets so it can prepare missing roles
+before AzerothCore performs its normal role check. It executes on the world
+thread and opens no network listener. No account password or GM web API is
+exposed to the server module.
+
+## FFXIV-style ConsolePortLK setup
+
+Open **Addons** and select **Install & Open Steam Input** on the FFXIV-style
+Crossbar card. Azeroth Control will install ConsolePortLK if it is missing,
+install its own small in-game preset addon, save a full WTF backup, and add
+local controller templates to Steam.
+
+Steam deliberately requires one final confirmation:
+
+1. Open **Templates** in the WoW Controller Settings screen.
+2. Choose **Azeroth FFXIV Crossbar**.
+3. Select **Apply Layout**.
+4. Start WoW. The in-game crossbar applies once after character login.
+
+Default controls are L2/R2 for two eight-skill banks, L2+R2 for a third bank,
+L1 for enemy targeting, L1+D-pad for zoom, X for the world map, A for interact,
+Y for jump, B for back/close, and R1 for the utility ring. Base D-pad inputs
+navigate targets. Trigger-modified D-pad and ABXY inputs remain skill buttons.
+
+Use `/affxiv` in game for a short reminder, `/affxiv apply` to repair the
+character preset, or `/affxiv restore` to restore the ConsolePort settings that
+were recorded before the first application. The file-level WTF backup is kept
+under `Interface/.azeroth-control-backups`.
 
 This native Steam Input route avoids WoWpadX, a Windows runtime, and shared
-Proton-prefix configuration. These steps follow the upstream
-[ConsolePortLK SteamOS instructions](https://github.com/leoaviana/ConsolePortLK#3-steam-game-controller-layout).
+Proton-prefix configuration. True retail-style nearest-object interaction is
+not available in an unmodified 3.3.5a client, so A uses target interaction with
+ConsolePort's cursor fallback.
 
 ## Important v0.1 limitations
 
@@ -188,12 +245,12 @@ Proton-prefix configuration. These steps follow the upstream
 - Missing host prerequisites are detected but not installed automatically.
 - The first server build is long and may be affected by upstream repository
   changes.
-- The Party Builder currently saves a local UI preset only. It does not yet
-  create, summon, gear, or specialize reserve bots.
-- LFG and battleground controls currently use the built-in Playerbots queue
-  behavior. Exact instant role filling is not implemented yet.
-- Controller community layouts are selected by the user in Steam; Azeroth
-  Control does not change Steam account or controller-cloud data.
+- Solo Dungeon Finder joins can be filled immediately with a prepared bot
+  party. Battleground queues still use the built-in Playerbots population and
+  timing.
+- Steam requires the user to confirm **Apply Layout** for a locally installed
+  controller template. Azeroth Control does not change Steam account or
+  controller-cloud data.
 - There is no automatic application/core/module updater or rollback manager in
   v0.1.
 - SteamOS and Proton updates can change non-Steam-game behavior.
@@ -203,14 +260,13 @@ Proton-prefix configuration. These steps follow the upstream
 Planned work includes:
 
 - An in-game, controller-friendly **Azeroth Quick Control** addon.
-- Fast class/role selection, bot summoning, removal, and stuck-party recovery.
+- Party Builder removal and stuck-party recovery controls.
 - Group-wide strategies for combat, buffs, grinding, following, questing, and
   regeneration.
-- Dungeon Clear controls for pull pacing, tank-led navigation, recovery, and
+- Expanded Dungeon Guide controls for live pull pacing, recovery and
   autoplay-style assistance using capabilities already exposed by AzerothCore
   and mod-playerbots.
-- Automatic bot level, gear, spell, talent, and role preparation.
-- On-demand LFG and battleground reserve bots with exact tank/healer/DPS roles.
+- On-demand battleground reserve bots and more configurable LFG compositions.
 - Better raid and PvP orchestration.
 - One-click SteamOS prerequisite setup.
 - Core/module compatibility checks, updates, backups, and rollback.

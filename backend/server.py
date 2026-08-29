@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -71,8 +72,8 @@ job_lock = threading.Lock()
 job = {"running": False, "label": "", "ok": True, "message": ""}
 
 
-def run(args: list[str], timeout: int = 15) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, text=True, capture_output=True, timeout=timeout, check=False)
+def run(args: list[str], timeout: int = 15, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, text=True, input=input_text, capture_output=True, timeout=timeout, check=False)
 
 
 def active_realm() -> str:
@@ -155,6 +156,158 @@ def online_bot_count(realm: str, fallback_logs: str) -> int:
         return int(result.stdout.strip()) if result.returncode == 0 else bot_count_from_logs(fallback_logs)
     except ValueError:
         return bot_count_from_logs(fallback_logs)
+
+
+PARTY_SPECS = {
+    1: {0: "Arms", 1: "Fury", 2: "Protection"},
+    2: {0: "Holy", 1: "Protection", 2: "Retribution"},
+    3: {0: "Beast Mastery", 1: "Marksmanship", 2: "Survival"},
+    4: {0: "Assassination", 1: "Combat", 2: "Subtlety"},
+    5: {0: "Discipline", 1: "Holy", 2: "Shadow"},
+    6: {0: "Blood", 1: "Frost", 2: "Unholy"},
+    7: {0: "Elemental", 1: "Enhancement", 2: "Restoration"},
+    8: {0: "Arcane", 1: "Fire", 2: "Frost"},
+    9: {0: "Affliction", 1: "Demonology", 2: "Destruction"},
+    11: {0: "Balance", 1: "Feral Tank", 2: "Restoration", 3: "Feral DPS"},
+}
+PARTY_CLASS_NAMES = {
+    1: "Warrior", 2: "Paladin", 3: "Hunter", 4: "Rogue", 5: "Priest",
+    6: "Death Knight", 7: "Shaman", 8: "Mage", 9: "Warlock", 11: "Druid",
+}
+PARTY_ROLE_SPECS = {
+    "Tank": {(1, 2), (2, 1), (6, 0), (11, 1)},
+    "Healer": {(2, 0), (5, 0), (5, 1), (7, 2), (11, 2)},
+    "DPS": {
+        (1, 0), (1, 1), (2, 2), (3, 0), (3, 1), (3, 2), (4, 0), (4, 1), (4, 2),
+        (5, 2), (6, 1), (6, 2), (7, 0), (7, 1), (8, 0), (8, 1), (8, 2),
+        (9, 0), (9, 1), (9, 2), (11, 0), (11, 3),
+    },
+}
+
+
+def party_bridge_version() -> str:
+    try:
+        return (ROOT / "state" / "party-bridge-version").read_text().strip()
+    except OSError:
+        return ""
+
+
+def online_human_players() -> list[dict]:
+    if container_state()[0] != "running":
+        return []
+    database = str(REALMS[active_realm()]["characters"])
+    query = (
+        f"SELECT c.name,c.level,c.class FROM {database}.characters c "
+        "JOIN acore_auth.account a ON a.id=c.account WHERE c.online=1 "
+        "AND UPPER(a.username) NOT LIKE 'RNDBOT%' AND UPPER(a.username) NOT LIKE 'ADDCLASS%' "
+        "ORDER BY c.name"
+    )
+    script = f'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e "{query}"'
+    result = run(["podman", "exec", DATABASE_CONTAINER, "sh", "-lc", script], timeout=10)
+    if result.returncode:
+        return []
+    players = []
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 3 or not re.fullmatch(r"[A-Za-z]{2,12}", fields[0]):
+            continue
+        try:
+            players.append({"name": fields[0], "level": int(fields[1]), "classId": int(fields[2])})
+        except ValueError:
+            continue
+    return players
+
+
+def party_payload() -> dict:
+    return {
+        "bridgeReady": bool(party_bridge_version()),
+        "bridgeVersion": party_bridge_version(),
+        "serverOnline": container_state()[0] == "running",
+        "players": online_human_players(),
+    }
+
+
+def validate_party_slots(raw_slots) -> list[dict]:
+    if not isinstance(raw_slots, list) or len(raw_slots) != 4:
+        raise ValueError("Party Builder requires exactly four bot slots")
+    slots = []
+    for raw in raw_slots:
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid party slot")
+        role = str(raw.get("role", ""))
+        try:
+            class_id = int(raw.get("classId"))
+            spec_id = int(raw.get("specId"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid class or specialization") from exc
+        if role not in PARTY_ROLE_SPECS or (class_id, spec_id) not in PARTY_ROLE_SPECS[role]:
+            raise ValueError(f"{PARTY_CLASS_NAMES.get(class_id, 'Selected class')} / {PARTY_SPECS.get(class_id, {}).get(spec_id, 'spec')} cannot fill the {role or 'selected'} role")
+        slots.append({"role": role, "classId": class_id, "specId": spec_id})
+    return slots
+
+
+def build_party(payload: dict) -> dict:
+    if not party_bridge_version():
+        raise RuntimeError("This managed server needs the Azeroth Control Party Bridge update")
+    if container_state()[0] != "running":
+        raise RuntimeError("Start the server before building a party")
+
+    leader = str(payload.get("leader", ""))
+    if not re.fullmatch(r"[A-Za-z]{2,12}", leader):
+        raise ValueError("Select an online player character")
+    online_names = {player["name"] for player in online_human_players()}
+    if leader not in online_names:
+        raise RuntimeError("The selected character must be logged into the world")
+
+    slots = validate_party_slots(payload.get("slots"))
+    request_id = secrets.token_hex(8)
+    encoded = ",".join(f'{slot["classId"]}:{slot["specId"]}' for slot in slots)
+    command = f"azerothcontrol party build {request_id} {leader} {encoded}"
+    submitted = run([str(CONTROL), "console"], timeout=30, input_text=command + "\n")
+    if submitted.returncode:
+        raise RuntimeError((submitted.stdout + submitted.stderr).strip()[-800:] or "World console rejected the Party Builder request")
+
+    marker = f"AZC_PARTY_RESULT|{request_id}|"
+    deadline = time.monotonic() + 180
+    result_line = ""
+    while time.monotonic() < deadline:
+        logs = run(["podman", "logs", "--tail", "10000", WORLD_CONTAINER], timeout=15)
+        combined = logs.stdout + logs.stderr
+        position = combined.rfind(marker)
+        if position >= 0:
+            result_line = combined[position:].splitlines()[0].strip()
+            break
+        time.sleep(0.5)
+    if not result_line:
+        raise RuntimeError("Party preparation did not finish within three minutes; check World Log before trying again")
+
+    fields = result_line.split("|")
+    if len(fields) < 5 or fields[2] == "ERR":
+        message = fields[4] if len(fields) > 4 else "The server could not prepare this party"
+        raise RuntimeError(message)
+    if len(fields) < 7 or fields[2] != "OK":
+        raise RuntimeError("Party Bridge returned an invalid response")
+
+    prepared = []
+    for entry in fields[6].split(";"):
+        values = entry.split(",")
+        if len(values) != 3:
+            continue
+        class_id, spec_id = int(values[1]), int(values[2])
+        prepared.append({
+            "name": values[0],
+            "classId": class_id,
+            "className": PARTY_CLASS_NAMES.get(class_id, "Unknown"),
+            "specId": spec_id,
+            "spec": PARTY_SPECS.get(class_id, {}).get(spec_id, "Unknown"),
+        })
+    return {
+        "ok": True,
+        "leader": fields[3],
+        "level": int(fields[4]),
+        "bots": prepared,
+        "message": f"Party ready: {len(prepared)} bots joined, prepared and summoned to {fields[3]}.",
+    }
 
 
 def status_payload() -> dict:
@@ -440,6 +593,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json_response(settings_payload(realm))
         if parsed.path == "/api/backups":
             return self.json_response({"backups": backup_entries()})
+        if parsed.path == "/api/party":
+            return self.json_response(party_payload())
         if parsed.path.startswith("/api/"):
             return self.json_response({"error": "Unknown API route"}, 404)
         if parsed.path != "/" and not (STATIC_ROOT / parsed.path.lstrip("/")).exists():
@@ -488,9 +643,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not start_task(f"Restoring backup {backup_id}", lambda: restore_full_backup(backup_id)):
                     return self.json_response({"error": "Another server action is still running"}, 409)
                 return self.json_response({"ok": True, "message": f"Restoring backup {backup_id}"}, 202)
+            if self.path == "/api/party/build":
+                return self.json_response(build_party(payload))
             return self.json_response({"error": "Unknown API route"}, 404)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             return self.json_response({"error": str(exc)}, 400)
+        except RuntimeError as exc:
+            return self.json_response({"error": str(exc)}, 409)
 
 
 def main() -> None:

@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: Azeroth Dungeon Guide
+## Notes: Simple controller-friendly Dungeon Clear prompt for AzerothCore PlayerBots.
+## Author: Azeroth Control contributors
+## Version: 0.1.0
+## OptionalDeps: ConsolePort, DungeonClear
+## SavedVariablesPerCharacter: AzerothDungeonGuideDB
+
+AzerothDungeonGuide.lua

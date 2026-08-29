@@ -4,11 +4,12 @@ type DesktopModule = { id: string; name: string; description: string; required?:
 type DesktopProfile = { id: string; name: string; expansion: string; description: string; levelCap: number; recommendedBots: number; estimatedBytes: number };
 type DesktopCatalog = { core: { name: string; estimatedDownloadBytes: number; estimatedInstalledBytes: number; freshInstallReady?: boolean }; profiles: DesktopProfile[]; modules: DesktopModule[] };
 type DesktopSystemInfo = { platform: string; release: string; cpuModel: string; cpuThreads: number; memoryBytes: number; disk: { freeBytes: number; totalBytes: number }; defaultInstallRoot: string; dependencies: Record<string, boolean> };
-type DesktopSelection = { mode: 'new' | 'import'; installRoot: string; clientPath: string; profile: string; bots: number; modules: string[]; stopWithGame: boolean; steamShortcuts: boolean; serverId?: string; serverName?: string; accountName?: string; accountPassword?: string; adminAccount?: boolean };
+type DesktopSelection = { mode: 'new' | 'import'; installRoot: string; clientPath: string; profile: string; bots: number; modules: string[]; stopWithGame: boolean; steamShortcuts: boolean; serverId?: string; serverName?: string; accountName?: string; accountPassword?: string; adminAccount?: boolean; autoLogin?: boolean };
 type DesktopInstallation = { id: string; name: string; path: string; provider: string; imported: boolean; createdAt: string };
 type DesktopState = { schemaVersion: number; onboardingComplete: boolean; activeInstallationId: string | null; installations: DesktopInstallation[] };
 type DesktopPlan = { requiredBytes: number; downloadBytes: number; freeBytes: number; enoughSpace: boolean; steps: string[] };
-type DesktopAddonState = { clientPath: string; addonsPath: string; steamInput: { found: boolean; shortcutName: string; gameId: string }; addons: Array<{ id: string; name: string; version: string; category: string; description: string; note: string; sourceUrl: string; installed: boolean; installedVersion: string | null }> };
+type DesktopControllerPreset = { version: string; installed: boolean; addonInstalled: boolean; steamTemplatesInstalled: number; steamTemplatesExpected: number; steamTemplateName: string; backupPath: string; installedAt: string };
+type DesktopAddonState = { clientPath: string; addonsPath: string; steamInput: { found: boolean; shortcutName: string; gameId: string }; addons: Array<{ id: string; name: string; version: string; category: string; description: string; note: string; sourceUrl: string; installed: boolean; installedVersion: string | null }>; controllerPreset: DesktopControllerPreset };
 type DesktopInstallProgress = { type?: string; ok?: boolean; message?: string };
 
 declare global {
@@ -28,6 +29,7 @@ declare global {
       openSteamInput(): Promise<{ ok: boolean; shortcutName: string }>;
       installAddon(id: string): Promise<DesktopAddonState>;
       removeAddon(id: string): Promise<DesktopAddonState>;
+      installControllerPreset(): Promise<DesktopAddonState>;
       detectInstallations(): Promise<Array<{ path: string; name: string; realms: number; resumable?: boolean; selection?: DesktopSelection }>>;
       importInstallation(path: string): Promise<DesktopInstallation>;
       selectInstallation(id: string): Promise<DesktopState>;
