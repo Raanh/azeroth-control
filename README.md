@@ -19,7 +19,7 @@ Azeroth Control is an independent community project. It is not affiliated with
 or endorsed by Blizzard Entertainment, Valve, AzerothCore, or the upstream
 module authors.
 
-## What version 0.1 can do
+## What version 0.2 can do
 
 ### Guided SteamOS installation
 
@@ -103,7 +103,7 @@ module authors.
 
 ## Available server modules
 
-Version 0.1 exposes this curated installer catalog. Modules are downloaded from
+Version 0.2 exposes this curated installer catalog. Modules are downloaded from
 their original repositories and retain their original licenses.
 
 | Module | Default | Purpose |
@@ -124,7 +124,7 @@ that every future upstream commit will remain compatible with this preview.
 
 ## Requirements
 
-Version 0.1 is primarily developed and tested for **x86-64 SteamOS 3.x** on a
+Version 0.2 is primarily developed and tested for **x86-64 SteamOS 3.x** on a
 Steam Deck or Steam Machine. Other x86-64 Linux distributions are experimental.
 
 You should have:
@@ -133,7 +133,7 @@ You should have:
   `Wow.exe` and a `Data` directory. `Wow-HD.exe` is used when present.
 - Proton Experimental installed from the Steam library.
 - Steam and an internet connection for the first build and upstream downloads.
-- Git, Python 3, Podman, and Distrobox available on the host. The v0.1 system
+- Git, Python 3, Podman, and Distrobox available on the host. The v0.2 system
   check reports missing tools but does not install them automatically.
 - At least 16 GB RAM. More memory allows a larger bot population.
 - At least 60 GB free before starting. The final installation is usually
@@ -146,7 +146,7 @@ You should have:
 
 1. Open the [Releases](https://github.com/raanh/azeroth-control/releases) page
    and download both:
-   - `Azeroth-Control-0.1.0-x86_64.AppImage`
+   - `Azeroth-Control-0.2.0-x86_64.AppImage`
    - `Azeroth-Control-SteamOS.sh`
 2. In Desktop Mode, create `~/Applications` and move both downloaded files into
    it.
@@ -239,7 +239,7 @@ Proton-prefix configuration. True retail-style nearest-object interaction is
 not available in an unmodified 3.3.5a client, so A uses target interaction with
 ConsolePort's cursor fallback.
 
-## Important v0.1 limitations
+## Important v0.2 limitations
 
 - This is the first public preview, not a zero-maintenance appliance.
 - Missing host prerequisites are detected but not installed automatically.
@@ -252,7 +252,7 @@ ConsolePort's cursor fallback.
   controller template. Azeroth Control does not change Steam account or
   controller-cloud data.
 - There is no automatic application/core/module updater or rollback manager in
-  v0.1.
+  v0.2.
 - SteamOS and Proton updates can change non-Steam-game behavior.
 
 ## Roadmap
