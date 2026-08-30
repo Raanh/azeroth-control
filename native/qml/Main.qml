@@ -8,6 +8,10 @@ ApplicationWindow {
     height: 1080
     color: "#091017"
     title: "Azeroth Control"
+    onActiveChanged: {
+        if (!active)
+            lower()
+    }
 
     property real s: Math.max(0.8, Math.min(width / 1920, height / 1080))
     property color gold: "#e6a126"
@@ -466,8 +470,10 @@ ApplicationWindow {
             highlighted: root.page === "addons"
             onClicked: {
                 root.page = "addons"
-                if (control.installations.length > 0)
+                if (control.installations.length > 0) {
                     control.apiGet("addons", "/api/addons")
+                    Qt.callLater(function() { root.focusAddonControl(0, 1, 0) })
+                }
             }
             KeyNavigation.up: worldButton; KeyNavigation.down: logsButton
         }
@@ -1019,6 +1025,16 @@ ApplicationWindow {
         Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
     }
 
+    Shortcut {
+        sequence: "Home"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            // Some Steam Input layouts expose Guide as a Qt Home key instead
+            // of BTN_MODE. Consume it before Controls move list focus and yield
+            // our Gamescope z-order to the SteamOS Home surface.
+            root.lower()
+        }
+    }
     Shortcut { sequence: "Esc"; onActivated: { if (control.installations.length === 0) root.showFirstTimeSetup(); else if (root.page !== "dashboard") root.page = "dashboard"; else root.showMinimized() } }
     Connections {
         target: control
@@ -1038,6 +1054,11 @@ ApplicationWindow {
                 if (s.autoJoinBg !== undefined) root.autoQueueBg = !!s.autoJoinBg
                 if (s.dynamicBrackets !== undefined) root.dynamicBrackets = !!s.dynamicBrackets
                 if (s.syncFactions !== undefined) root.syncFactions = !!s.syncFactions
+            }
+            if (root.page === "addons") {
+                var addonData = control.data["/api/addons/action"] || control.data["/api/addons"]
+                if (addonData && addonData.addons)
+                    Qt.callLater(function() { root.focusAddonControl(root.addonFocusIndex, root.addonFocusAction, 0) })
             }
         }
     }
