@@ -47,6 +47,10 @@ module authors.
 - Shows installation stages, elapsed/estimated time, CPU use, memory use, and a
   collapsible technical log.
 - Checkpoints long build stages so an interrupted installation can resume.
+- Supports pausing, resuming, and safely canceling native installations while
+  preserving completed checkpoints.
+- Reuses a fingerprinted shared server engine for additional realms with the
+  same core, module revisions, bridge, and build options.
 - Detects, imports, and controls compatible existing installations without
   moving their files.
 - Supports multiple separately managed local server installations.
@@ -83,6 +87,8 @@ module authors.
 
 - Install or remove verified upstream releases of ConsolePortLK, Questie-X and
   RefinedBlizzPlates.
+- Manage installed state, descriptions, versions, bundled Dungeon Guide, and
+  the FFXIV Crossbar preset directly from the native Addons screen.
 - Verify addon downloads with SHA-256 before extraction.
 - Move replaced or removed addon folders into a recoverable local backup.
 - Install the bundled **Azeroth Dungeon Guide**, a large controller-friendly

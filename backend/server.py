@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -13,7 +14,10 @@ import socket
 import subprocess
 import tarfile
 import threading
+import tempfile
 import time
+import urllib.request
+import zipfile
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,6 +41,76 @@ except OSError:
 WORLD_CONTAINER = f"{CONTAINER_PREFIX}-worldserver"
 AUTH_CONTAINER = f"{CONTAINER_PREFIX}-authserver"
 DATABASE_CONTAINER = f"{CONTAINER_PREFIX}-database"
+
+ADDON_CATALOG = [
+    {"id": "azeroth-dungeon-guide", "name": "Azeroth Dungeon Guide", "version": "0.1.0", "category": "Gamepad", "description": "Controller-friendly dungeon run selector for Dungeon Clear.", "note": "Choose Dynamic, Fast, Careful or Manual tank-leading behavior.", "sourceUrl": "https://github.com/Raanh/azeroth-control", "bundledFolder": "AzerothDungeonGuide", "folders": ["AzerothDungeonGuide"]},
+    {"id": "consoleportlk", "name": "ConsolePortLK", "version": "1.5.0-rc2", "category": "Gamepad", "description": "Controller action bars, menus and navigation for WoW 3.3.5a.", "note": "Recommended for Steam Deck and living-room play.", "sourceUrl": "https://github.com/leoaviana/ConsolePortLK", "downloadUrl": "https://github.com/leoaviana/ConsolePortLK/releases/download/1.5.0-rc2/ConsolePortLK-1.5.0-rc2.zip", "sha256": "9ee20bb1f3c5c5b8d45fcc5980a07bb90d49a707e120613453177c05fea6497f", "folders": ["ConsolePort", "ConsolePortAdvanced", "ConsolePortBar", "ConsolePortHelp", "ConsolePortKeyboard", "ConsolePortLoader", "ConsolePortUI_Loot", "ConsolePortUI_Menu"]},
+    {"id": "questiex", "name": "Questie-X", "version": "1.6.4", "category": "Questing", "description": "Quest objectives, map markers and tracker support.", "note": "Private-server build with a 3.3.5a-compatible TOC.", "sourceUrl": "https://github.com/Xurkon/Questie-X", "downloadUrl": "https://github.com/Xurkon/Questie-X/releases/download/v1.6.4/Questie-X-1.6.4.zip", "sha256": "621bf504c43da8d7e34c06b48aeb7dd85cb45b568d0f6a8630a7cfea4143f65f", "folders": ["Questie-X"]},
+    {"id": "refined-blizz-plates", "name": "RefinedBlizzPlates", "version": "1.11.2", "category": "Interface", "description": "Modern readable Blizzard-style nameplates for WotLK.", "note": "Configure it in game after restarting WoW.", "sourceUrl": "https://github.com/KhalGH/RefinedBlizzPlates-WotLK", "downloadUrl": "https://github.com/KhalGH/RefinedBlizzPlates-WotLK/releases/download/v1.11.2/RefinedBlizzPlates-v1.11.2.zip", "sha256": "5f5eb1527a997a6e0439966910ec9ea506b577240c0c0e1a0b0e5c2f915ba39a", "folders": ["!!RefinedBlizzPlates"]},
+    {"id": "ffxiv-controller", "name": "Azeroth FFXIV Crossbar", "version": "0.1.0", "category": "Gamepad", "description": "FFXIV-style L2/R2 crossbar preset for ConsolePortLK.", "note": "Install ConsolePortLK first; Steam Input layout confirmation remains manual.", "sourceUrl": "https://github.com/Raanh/azeroth-control", "bundledFolder": "AzerothFFXIVController", "folders": ["AzerothFFXIVController"]},
+]
+
+
+def addon_paths():
+    selection = json.loads((ROOT / "install-selection.json").read_text())
+    client = Path(selection["clientPath"]).expanduser().resolve()
+    addons = client / "Interface" / "AddOns"
+    records = client / "Interface" / ".azeroth-control-addons.json"
+    return client, addons, records
+
+
+def addon_payload() -> dict:
+    client, addons, records_path = addon_paths()
+    try: records = json.loads(records_path.read_text())
+    except (OSError, json.JSONDecodeError): records = {}
+    entries = []
+    for addon in ADDON_CATALOG:
+        item = dict(addon)
+        item["installed"] = all((addons / folder).is_dir() for folder in addon["folders"])
+        item["installedVersion"] = records.get(addon["id"], {}).get("version", "")
+        entries.append(item)
+    return {"clientPath": str(client), "addonsPath": str(addons), "addons": entries}
+
+
+def change_addon(addon_id: str, action: str) -> dict:
+    addon = next((item for item in ADDON_CATALOG if item["id"] == addon_id), None)
+    if not addon: raise ValueError("Unknown addon")
+    client, addons, records_path = addon_paths()
+    addons.mkdir(parents=True, exist_ok=True)
+    try: records = json.loads(records_path.read_text())
+    except (OSError, json.JSONDecodeError): records = {}
+    backup = client / "Interface" / ".azeroth-control-backups" / f"{addon_id}-{int(time.time())}"
+    if action == "remove":
+        for folder in addon["folders"]:
+            target = addons / folder
+            if target.exists(): backup.mkdir(parents=True, exist_ok=True); shutil.move(str(target), str(backup / folder))
+        records.pop(addon_id, None)
+    elif action == "install":
+        with tempfile.TemporaryDirectory(prefix="azeroth-addon-") as temporary:
+            extracted = Path(temporary) / "extracted"
+            if addon.get("bundledFolder"):
+                source_root = APP_ROOT / "resources" / "addons"
+            else:
+                archive = Path(temporary) / "addon.zip"
+                with urllib.request.urlopen(addon["downloadUrl"], timeout=90) as response:
+                    data = response.read(200 * 1024 * 1024 + 1)
+                if len(data) > 200 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != addon["sha256"]: raise ValueError("Addon download checksum failed")
+                archive.write_bytes(data); extracted.mkdir()
+                with zipfile.ZipFile(archive) as bundle:
+                    for member in bundle.namelist():
+                        path = Path(member.replace("\\", "/"))
+                        if path.is_absolute() or ".." in path.parts: raise ValueError("Unsafe addon archive")
+                    bundle.extractall(extracted)
+                source_root = extracted
+            for folder in addon["folders"]:
+                source, target = source_root / folder, addons / folder
+                if not source.is_dir(): raise ValueError(f"Addon release is missing {folder}")
+                if target.exists(): backup.mkdir(parents=True, exist_ok=True); shutil.move(str(target), str(backup / folder))
+                shutil.copytree(source, target)
+        records[addon_id] = {"version": addon["version"], "installedAt": dt.datetime.now(dt.timezone.utc).isoformat(), "folders": addon["folders"]}
+    else: raise ValueError("Unknown addon action")
+    records_path.write_text(json.dumps(records, indent=2))
+    return addon_payload()
 
 REALMS = {
     "progression": {"config": RUNTIME / "etc", "port": 8085, "name": "AzerothCore Progression", "characters": "acore_characters"},
@@ -735,6 +809,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json_response(party_payload())
         if parsed.path == "/api/maintenance":
             return self.json_response(maintenance_payload())
+        if parsed.path == "/api/addons":
+            return self.json_response(addon_payload())
         if parsed.path.startswith("/api/"):
             return self.json_response({"error": "Unknown API route"}, 404)
         if parsed.path != "/" and not (STATIC_ROOT / parsed.path.lstrip("/")).exists():
@@ -750,6 +826,15 @@ class Handler(SimpleHTTPRequestHandler):
             if length > 65536:
                 raise ValueError("Request is too large")
             payload = json.loads(self.rfile.read(length) or b"{}")
+            if self.path == "/api/addons/action":
+                action = payload.get("action", "")
+                if action == "open-folder":
+                    _client, addons, _records = addon_paths(); addons.mkdir(parents=True, exist_ok=True)
+                    subprocess.Popen(["xdg-open", str(addons)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return self.json_response({"ok": True, "message": "Addon folder opened."})
+                result = change_addon(str(payload.get("id", "")), str(action))
+                result["ok"] = True; result["message"] = "Addon library updated. Restart WoW to apply changes."
+                return self.json_response(result)
             if self.path == "/api/action":
                 action = payload.get("action")
                 realm = payload.get("realm", active_realm())

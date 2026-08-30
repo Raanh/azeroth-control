@@ -19,6 +19,7 @@ class Controller final : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool gameRunning READ gameRunning NOTIFY gameRunningChanged)
     Q_PROPERTY(bool installRunning READ installRunning NOTIFY installChanged)
+    Q_PROPERTY(bool installPaused READ installPaused NOTIFY installChanged)
     Q_PROPERTY(int installProgress READ installProgress NOTIFY installChanged)
     Q_PROPERTY(QString installMessage READ installMessage NOTIFY installChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
@@ -29,6 +30,7 @@ class Controller final : public QObject
     Q_PROPERTY(double dropRate READ dropRate NOTIFY settingsChanged)
     Q_PROPERTY(double spawnRate READ spawnRate NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap data READ data NOTIFY dataChanged)
+    Q_PROPERTY(QVariantList installations READ installations NOTIFY installationsChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
 
 public:
@@ -44,6 +46,7 @@ public:
     bool busy() const { return m_busy; }
     bool gameRunning() const { return m_gameRunning; }
     bool installRunning() const { return m_installRunning; }
+    bool installPaused() const { return m_installPaused; }
     int installProgress() const { return m_installProgress; }
     QString installMessage() const { return m_installMessage; }
     QString notice() const { return m_notice; }
@@ -54,7 +57,8 @@ public:
     double dropRate() const { return m_dropRate; }
     double spawnRate() const { return m_spawnRate; }
     QVariantMap data() const { return m_data; }
-    QString version() const { return QStringLiteral("0.4.0-preview.1"); }
+    QVariantList installations() const { return m_installations; }
+    QString version() const { return QStringLiteral("0.4.0-preview.2"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});
@@ -64,6 +68,10 @@ public:
     Q_INVOKABLE void apiGet(const QString &key, const QString &path);
     Q_INVOKABLE void apiPost(const QString &key, const QString &path, const QVariantMap &payload = {});
     Q_INVOKABLE void installServer(const QVariantMap &selection);
+    Q_INVOKABLE void pauseInstallation();
+    Q_INVOKABLE void cancelInstallation();
+    Q_INVOKABLE void removeInstallation(const QString &id, bool deleteFiles);
+    Q_INVOKABLE void reloadInstallations();
     Q_INVOKABLE void clearNotice();
     void dispatchGamepad(const QString &command) { emit gamepadAction(command); }
 
@@ -75,6 +83,7 @@ signals:
     void settingsChanged();
     void dataChanged();
     void installChanged();
+    void installationsChanged();
     void yieldToGame();
     void gamepadAction(const QString &command);
 
@@ -86,6 +95,7 @@ private:
     void applyStatus(const QJsonObject &payload);
     void setBusy(bool value);
     void setNotice(const QString &value);
+    QString statePath() const;
 
     QNetworkAccessManager m_network;
     QProcess m_backend;
@@ -109,6 +119,9 @@ private:
     QString m_notice;
     QProcess m_installProcess;
     bool m_installRunning = false;
+    bool m_installPaused = false;
+    bool m_installCanceled = false;
     int m_installProgress = 0;
     QString m_installMessage;
+    QVariantList m_installations;
 };

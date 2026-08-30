@@ -34,6 +34,7 @@ ApplicationWindow {
     property var openGamepadCombo: null
     property int openGamepadComboInitialIndex: -1
     property var openGamepadSelect: null
+    property var deleteInstallationTarget: null
     property var partyRoles: ["Tank", "Healer", "DPS"]
     property var partyClasses: [
         {"id":1,"name":"Warrior","specs":[{"id":0,"name":"Arms","role":"DPS"},{"id":1,"name":"Fury","role":"DPS"},{"id":2,"name":"Protection","role":"Tank"}]},
@@ -336,7 +337,7 @@ ApplicationWindow {
             x: 26 * root.s; y: 217 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "◇   Realms"; font.pixelSize: 19 * root.s
             highlighted: root.page === "realms" || root.page === "install"
-            onClicked: root.page = "realms"
+            onClicked: { root.page = "realms"; control.reloadInstallations() }
             KeyNavigation.up: dashboardButton; KeyNavigation.down: botsButton
         }
         AzButton {
@@ -376,7 +377,7 @@ ApplicationWindow {
             x: 26 * root.s; y: 577 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "✚   Addons"; font.pixelSize: 19 * root.s
             highlighted: root.page === "addons"
-            onClicked: root.page = "addons"
+            onClicked: { root.page = "addons"; control.apiGet("addons", "/api/addons") }
             KeyNavigation.up: worldButton; KeyNavigation.down: logsButton
         }
         AzButton {
@@ -547,8 +548,18 @@ ApplicationWindow {
                         AzButton { anchors.left: parent.left; anchors.leftMargin: 18 * root.s; anchors.right: parent.right; anchors.rightMargin: 18 * root.s; anchors.bottom: parent.bottom; anchors.bottomMargin: 16 * root.s; height: 52 * root.s; text: "＋  Create a new server"; primary: true; font.pixelSize: 17 * root.s; onClicked: root.page = "install"; KeyNavigation.left: realmStart }
                     }
 
-                    Text { x: 24 * root.s; y: 390 * root.s; text: "PLAY FLOW"; color: root.muted; font.pixelSize: 14 * root.s; font.letterSpacing: 1.4 }
-                    Text { x: 24 * root.s; y: 425 * root.s; width: parent.width - 48 * root.s; text: "1   Select a profile\n\n2   Start the realm\n\n3   Launch your WoW shortcut from Steam"; color: root.ink; font.pixelSize: 18 * root.s }
+                    Text { x: 24 * root.s; y: 390 * root.s; text: "INSTALLED SERVERS"; color: root.muted; font.pixelSize: 14 * root.s; font.letterSpacing: 1.4 }
+                    ListView {
+                        x: 24 * root.s; y: 420 * root.s; width: parent.width - 48 * root.s; height: parent.height - 440 * root.s
+                        spacing: 8 * root.s; clip: true; model: control.installations
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: ListView.view.width; height: 64 * root.s; radius: 8 * root.s; color: root.raised; border.color: root.edge
+                            Text { x: 14 * root.s; y: 9 * root.s; width: parent.width - 150 * root.s; text: modelData.name || "Azeroth Server"; color: root.ink; font.pixelSize: 16 * root.s; font.bold: true; elide: Text.ElideRight }
+                            Text { x: 14 * root.s; y: 36 * root.s; width: parent.width - 150 * root.s; text: modelData.imported ? "Imported · files protected" : "Managed server"; color: root.muted; font.pixelSize: 13 * root.s }
+                            AzButton { anchors.right: parent.right; anchors.rightMargin: 8 * root.s; anchors.verticalCenter: parent.verticalCenter; width: 112 * root.s; height: 46 * root.s; text: modelData.imported ? "Forget" : "Remove"; danger: true; font.pixelSize: 14 * root.s; onClicked: root.deleteInstallationTarget = modelData }
+                        }
+                    }
                 }
             }
 
@@ -581,7 +592,11 @@ ApplicationWindow {
                 Text { text: "Bot count: " + Math.round(installBots.value); color: root.ink; font.pixelSize: 22 * root.s }
                 Slider { id: installBots; width: 720 * root.s; from: 0; to: 2000; stepSize: 50; value: 500; live: true; KeyNavigation.down: installButton }
                 Text { text: "The installer estimates disk usage and creates the managed containers. WoW files are never downloaded or added to Steam."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
-                AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start / Resume installation"; primary: true; width: 290 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: { var chosenProfile = root.installProfiles[installProfile.selectedIndex]; control.installServer({"profile": chosenProfile.id, "clientPath": installClient.text, "bots": Math.round(installBots.value), "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": "Azeroth " + chosenProfile.name, "accountName": root.firstAccount, "accountPassword": root.firstPassword}) } KeyNavigation.up: installBots }
+                Row { spacing: 12 * root.s
+                    AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start / Resume installation"; primary: true; width: 290 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: { var chosenProfile = root.installProfiles[installProfile.selectedIndex]; control.installServer({"profile": chosenProfile.id, "clientPath": installClient.text, "bots": Math.round(installBots.value), "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": "Azeroth " + chosenProfile.name, "accountName": root.firstAccount, "accountPassword": root.firstPassword}) } KeyNavigation.up: installBots; KeyNavigation.right: pauseInstallButton }
+                    AzButton { id: pauseInstallButton; text: control.installPaused ? "Resume" : "Pause"; width: 150 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; visible: control.installRunning; onClicked: control.pauseInstallation(); KeyNavigation.left: installButton; KeyNavigation.right: cancelInstallButton }
+                    AzButton { id: cancelInstallButton; text: "Cancel"; danger: true; width: 150 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; visible: control.installRunning; onClicked: control.cancelInstallation(); KeyNavigation.left: pauseInstallButton }
+                }
                 ProgressBar { width: 800 * root.s; from: 0; to: 100; value: control.installProgress; visible: control.installRunning || control.installProgress > 0 }
                 Text { text: control.installMessage; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap; visible: control.installMessage.length > 0 }
             }
@@ -773,19 +788,26 @@ ApplicationWindow {
                 }
             }
 
-            Column {
-                x: 36 * root.s; y: 100 * root.s; spacing: 16 * root.s
+            Item {
+                x: 36 * root.s; y: 100 * root.s; width: parent.width - 72 * root.s; height: parent.height - 130 * root.s
                 visible: root.page === "addons"
-                Text { text: "WoW addon library"; color: root.ink; font.pixelSize: 24 * root.s }
-                Text { text: "Install addons into the configured 3.3.5a client. The installer never downloads WoW itself."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap; width: 900 * root.s }
-                Repeater {
-                    model: ["ConsolePortLK / WoWpadX", "Questie", "RefinedBlizzPlates-WotLK", "DungeonClear guide", "PlayerBots / MultiBot chatless"]
-                    delegate: Rectangle { width: 820 * root.s; height: 52 * root.s; radius: 8 * root.s; color: root.raised; border.color: root.edge
-                        Text { anchors.left: parent.left; anchors.leftMargin: 18 * root.s; anchors.verticalCenter: parent.verticalCenter; text: modelData; color: root.ink; font.pixelSize: 18 * root.s }
-                        Text { anchors.right: parent.right; anchors.rightMargin: 18 * root.s; anchors.verticalCenter: parent.verticalCenter; text: "Available"; color: "#58d38c"; font.pixelSize: 16 * root.s }
+                property var addonInfo: { var changed = control.data["/api/addons/action"]; return changed && changed.addons ? changed : (control.data["/api/addons"] || {}) }
+                Text { x: 0; y: 0; text: "WoW addon library"; color: root.ink; font.pixelSize: 24 * root.s; font.bold: true }
+                Text { x: 0; y: 38 * root.s; width: parent.width - 260 * root.s; text: addonInfo.clientPath ? "Client: " + addonInfo.clientPath : "Loading configured client…"; color: root.muted; font.pixelSize: 15 * root.s; elide: Text.ElideMiddle }
+                AzButton { anchors.right: parent.right; y: 0; text: "Open addon folder"; width: 220 * root.s; height: 54 * root.s; font.pixelSize: 16 * root.s; onClicked: control.apiPost("addons-folder", "/api/addons/action", {"action":"open-folder"}) }
+                ListView {
+                    x: 0; y: 78 * root.s; width: parent.width; height: parent.height - 78 * root.s; spacing: 12 * root.s; clip: true
+                    model: parent.addonInfo.addons || []
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: ListView.view.width; height: 116 * root.s; radius: 10 * root.s; color: root.raised; border.color: modelData.installed ? "#2d8d60" : root.edge
+                        Text { x: 18 * root.s; y: 14 * root.s; text: modelData.name; color: root.ink; font.pixelSize: 20 * root.s; font.bold: true }
+                        Text { x: 18 * root.s; y: 46 * root.s; width: parent.width - 210 * root.s; text: modelData.description; color: root.ink; font.pixelSize: 15 * root.s; wrapMode: Text.Wrap }
+                        Text { x: 18 * root.s; y: 82 * root.s; width: parent.width - 210 * root.s; text: modelData.note; color: root.muted; font.pixelSize: 13 * root.s; elide: Text.ElideRight }
+                        Text { anchors.right: parent.right; anchors.rightMargin: 22 * root.s; y: 14 * root.s; text: modelData.installed ? "INSTALLED " + (modelData.installedVersion || "") : "v" + modelData.version; color: modelData.installed ? "#58d38c" : root.gold; font.pixelSize: 13 * root.s; font.bold: true }
+                        AzButton { anchors.right: parent.right; anchors.rightMargin: 16 * root.s; y: 48 * root.s; width: 155 * root.s; height: 52 * root.s; text: modelData.installed ? "Remove" : "Install"; danger: modelData.installed; primary: !modelData.installed; font.pixelSize: 16 * root.s; enabled: !control.busy; onClicked: control.apiPost("addons", "/api/addons/action", {"action": modelData.installed ? "remove" : "install", "id": modelData.id}) }
                     }
                 }
-                AzButton { text: "Open addon folder"; width: 240 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; onClicked: control.apiPost("addons-folder", "/api/action", {"action":"open-addons"}) }
             }
 
             Column {
@@ -808,6 +830,24 @@ ApplicationWindow {
                 }
                 Text { text: "Updates create a recovery backup before changing the managed server."; color: root.muted; font.pixelSize: 18 * root.s; wrapMode: Text.Wrap }
                 Text { text: { var b = control.data["/api/backups"]; return b && b.backups ? "Backups available: " + b.backups.length : "Backups: loading…" } color: root.gold; font.pixelSize: 17 * root.s }
+            }
+        }
+    }
+
+    Dialog {
+        id: removeServerDialog
+        visible: root.deleteInstallationTarget !== null
+        modal: true; anchors.centerIn: parent; width: 720 * root.s; height: 350 * root.s
+        closePolicy: Popup.NoAutoClose
+        background: Rectangle { radius: 16 * root.s; color: root.panel; border.width: 2 * root.s; border.color: root.gold }
+        contentItem: Item {
+            Text { x: 28 * root.s; y: 22 * root.s; text: "REMOVE SERVER"; color: root.gold; font.pixelSize: 15 * root.s; font.bold: true; font.letterSpacing: 1.3 }
+            Text { x: 28 * root.s; y: 58 * root.s; width: parent.width - 56 * root.s; text: root.deleteInstallationTarget ? root.deleteInstallationTarget.name : ""; color: root.ink; font.pixelSize: 27 * root.s; font.bold: true }
+            Text { x: 28 * root.s; y: 108 * root.s; width: parent.width - 56 * root.s; text: root.deleteInstallationTarget && root.deleteInstallationTarget.imported ? "Forget removes this entry from Azeroth Control. Imported files are never deleted." : "Remove Only keeps all files. Delete Server Data stops the server and moves its managed folder to Trash. WoW files are never touched."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
+            Row { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 24 * root.s; spacing: 12 * root.s
+                AzButton { text: "Cancel"; width: 150 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; onClicked: root.deleteInstallationTarget = null }
+                AzButton { text: root.deleteInstallationTarget && root.deleteInstallationTarget.imported ? "Forget" : "Remove Only"; width: 180 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; onClicked: { control.removeInstallation(root.deleteInstallationTarget.id, false); root.deleteInstallationTarget = null } }
+                AzButton { visible: root.deleteInstallationTarget && !root.deleteInstallationTarget.imported; text: "Delete Server Data"; danger: true; width: 210 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; onClicked: { control.removeInstallation(root.deleteInstallationTarget.id, true); root.deleteInstallationTarget = null } }
             }
         }
     }

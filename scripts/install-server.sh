@@ -173,6 +173,18 @@ WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:$IMAGE_TAG"
 AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:$IMAGE_TAG"
 IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:$IMAGE_TAG"
 DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
+ENGINE_FINGERPRINT="$({
+    git -C "$CORE" rev-parse HEAD
+    find "$CORE/modules" -mindepth 1 -maxdepth 1 -type d -name 'mod-*' -print0 | sort -z | while IFS= read -r -d '' module; do
+        printf '%s=' "$(basename "$module")"
+        if [[ -d "$module/.git" ]]; then git -C "$module" rev-parse HEAD; else find "$module" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum; fi
+    done
+    printf 'bridge=%s\nuid=%s\ngid=%s\n' "$PARTY_BRIDGE_VERSION" "$HOST_UID" "$HOST_GID"
+} | sha256sum | cut -c1-20)"
+SHARED_WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:engine-$ENGINE_FINGERPRINT"
+SHARED_AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:engine-$ENGINE_FINGERPRINT"
+SHARED_IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:engine-$ENGINE_FINGERPRINT"
+SHARED_DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:engine-$ENGINE_FINGERPRINT"
 {
     printf 'PROFILE=%q\n' "$PROFILE"
     printf 'REALM_KEY=%q\n' "$REALM_KEY"
@@ -235,12 +247,21 @@ fi
 touch "$CHECKPOINTS/configuration"
 
 if [[ ! -f "$CHECKPOINTS/images" ]]; then
-    printf '[4/6] Building server containers. This is the longest step…\n'
-    BUILD_ARGS=(--layers --build-arg "USER_ID=$HOST_UID" --build-arg "GROUP_ID=$HOST_GID" --build-arg DOCKER_USER=acore -f "$DOCKERFILE")
-    podman build "${BUILD_ARGS[@]}" --target worldserver -t "$WORLD_IMAGE" "$CORE"
-    podman build "${BUILD_ARGS[@]}" --target authserver -t "$AUTH_IMAGE" "$CORE"
-    podman build "${BUILD_ARGS[@]}" --target db-import -t "$IMPORT_IMAGE" "$CORE"
-    podman build "${BUILD_ARGS[@]}" --target client-data -t "$DATA_IMAGE" "$CORE"
+    if podman image exists "$SHARED_WORLD_IMAGE" && podman image exists "$SHARED_AUTH_IMAGE" \
+        && podman image exists "$SHARED_IMPORT_IMAGE" && podman image exists "$SHARED_DATA_IMAGE"; then
+        printf '[4/6] Reusing compatible shared server engine %s…\n' "$ENGINE_FINGERPRINT"
+    else
+        printf '[4/6] Building shared server engine %s. This is the longest first-install step…\n' "$ENGINE_FINGERPRINT"
+        BUILD_ARGS=(--layers --build-arg "USER_ID=$HOST_UID" --build-arg "GROUP_ID=$HOST_GID" --build-arg DOCKER_USER=acore -f "$DOCKERFILE")
+        podman build "${BUILD_ARGS[@]}" --target worldserver -t "$SHARED_WORLD_IMAGE" "$CORE"
+        podman build "${BUILD_ARGS[@]}" --target authserver -t "$SHARED_AUTH_IMAGE" "$CORE"
+        podman build "${BUILD_ARGS[@]}" --target db-import -t "$SHARED_IMPORT_IMAGE" "$CORE"
+        podman build "${BUILD_ARGS[@]}" --target client-data -t "$SHARED_DATA_IMAGE" "$CORE"
+    fi
+    podman tag "$SHARED_WORLD_IMAGE" "$WORLD_IMAGE"
+    podman tag "$SHARED_AUTH_IMAGE" "$AUTH_IMAGE"
+    podman tag "$SHARED_IMPORT_IMAGE" "$IMPORT_IMAGE"
+    podman tag "$SHARED_DATA_IMAGE" "$DATA_IMAGE"
     touch "$CHECKPOINTS/images"
     printf '%s\n' "$PARTY_BRIDGE_VERSION" > "$SERVER_ROOT/state/party-bridge-version"
 else

@@ -14,6 +14,10 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <QUrlQuery>
+#ifdef Q_OS_LINUX
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 namespace {
 constexpr auto ApiBase = "http://127.0.0.1:8742";
@@ -26,13 +30,38 @@ QJsonObject readJson(const QString &path)
     return QJsonDocument::fromJson(file.readAll()).object();
 }
 
+QString readEnvValue(const QString &path, const QString &key)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const QRegularExpression pattern(QStringLiteral("^%1=([^\\r\\n]+)$").arg(QRegularExpression::escape(key)), QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch match = pattern.match(QString::fromUtf8(file.readAll()));
+    return match.hasMatch() ? match.captured(1).trimmed().remove('"').remove('\'') : QString();
+}
+
 }
 
 Controller::Controller(QObject *parent) : QObject(parent)
 {
     m_root = findActiveRoot();
+    reloadInstallations();
     m_refreshTimer.setInterval(5000);
     connect(&m_refreshTimer, &QTimer::timeout, this, &Controller::refresh);
+}
+
+QString Controller::statePath() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        + QStringLiteral("/azeroth-control/state.json");
+}
+
+void Controller::reloadInstallations()
+{
+    m_installations.clear();
+    for (const QJsonValue &value : readJson(statePath()).value(QStringLiteral("installations")).toArray())
+        m_installations.append(value.toObject().toVariantMap());
+    emit installationsChanged();
 }
 
 void Controller::start()
@@ -44,9 +73,7 @@ void Controller::start()
 
 QString Controller::findActiveRoot() const
 {
-    const QString config = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-        + QStringLiteral("/azeroth-control/state.json");
-    const QJsonObject state = readJson(config);
+    const QJsonObject state = readJson(statePath());
     const QString activeId = state.value(QStringLiteral("activeInstallationId")).toString();
     const QJsonArray installations = state.value(QStringLiteral("installations")).toArray();
     for (const QJsonValue &value : installations) {
@@ -189,10 +216,12 @@ void Controller::installServer(const QVariantMap &input)
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("AZEROTH_CATALOG"), qEnvironmentVariable("AZEROTH_CONTROL_CATALOG", installer.left(installer.lastIndexOf('/')) + QStringLiteral("/../manifests/catalog.json")));
     m_installProcess.setProcessEnvironment(environment);
-    m_installProcess.setProgram(QStringLiteral("bash"));
-    m_installProcess.setArguments({installer, configPath});
+    m_installProcess.setProgram(QStringLiteral("setsid"));
+    m_installProcess.setArguments({QStringLiteral("bash"), installer, configPath});
     m_installProcess.setProcessChannelMode(QProcess::MergedChannels);
     m_installRunning = true;
+    m_installPaused = false;
+    m_installCanceled = false;
     m_installProgress = 0;
     m_installMessage = QStringLiteral("Preparing installation…");
     setBusy(true);
@@ -219,9 +248,8 @@ void Controller::installServer(const QVariantMap &input)
                 const QJsonObject selection = readJson(configPath);
                 const QString serverRoot = QDir::cleanPath(selection.value(QStringLiteral("installRoot")).toString()
                     + QStringLiteral("/servers/") + selection.value(QStringLiteral("serverId")).toString());
-                const QString statePath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-                    + QStringLiteral("/azeroth-control/state.json");
-                QJsonObject state = readJson(statePath);
+                const QString stateFilePath = statePath();
+                QJsonObject state = readJson(stateFilePath);
                 if (state.isEmpty()) {
                     state.insert(QStringLiteral("schemaVersion"), 1);
                     state.insert(QStringLiteral("onboardingComplete"), false);
@@ -241,13 +269,13 @@ void Controller::installServer(const QVariantMap &input)
                 state.insert(QStringLiteral("installations"), updated);
                 state.insert(QStringLiteral("activeInstallationId"), id);
                 state.insert(QStringLiteral("onboardingComplete"), true);
-                QDir().mkpath(QFileInfo(statePath).absolutePath());
-                QFile stateFile(statePath + QStringLiteral(".tmp"));
+                QDir().mkpath(QFileInfo(stateFilePath).absolutePath());
+                QFile stateFile(stateFilePath + QStringLiteral(".tmp"));
                 if (stateFile.open(QIODevice::WriteOnly)) {
                     stateFile.write(QJsonDocument(state).toJson(QJsonDocument::Indented));
                     stateFile.close();
-                    QFile::remove(statePath);
-                    QFile::rename(statePath + QStringLiteral(".tmp"), statePath);
+                    QFile::remove(stateFilePath);
+                    QFile::rename(stateFilePath + QStringLiteral(".tmp"), stateFilePath);
                 }
                 m_root = serverRoot;
                 // The backend receives AZEROTH_SERVER_ROOT at process start; restart it
@@ -258,13 +286,17 @@ void Controller::installServer(const QVariantMap &input)
                         m_backend.kill();
                 }
                 startBackend();
+                reloadInstallations();
             }
             const QString failureDetail = m_installMessage;
             m_installRunning = false;
+            m_installPaused = false;
             m_installProgress = code == 0 ? 100 : m_installProgress;
             m_installMessage = code == 0
                 ? QStringLiteral("Installation completed. Restart the native app to load the new server.")
-                : QStringLiteral("Installation failed: %1 · Log: %2").arg(failureDetail, logPath);
+                : m_installCanceled
+                    ? QStringLiteral("Installation canceled. Downloaded files and checkpoints were preserved for Resume.")
+                    : QStringLiteral("Installation failed: %1 · Log: %2").arg(failureDetail, logPath);
             setBusy(false);
             emit installChanged();
             setNotice(m_installMessage);
@@ -272,6 +304,87 @@ void Controller::installServer(const QVariantMap &input)
                 QFile::remove(configPath);
         });
     m_installProcess.start();
+}
+
+void Controller::pauseInstallation()
+{
+#ifdef Q_OS_LINUX
+    if (!m_installRunning || m_installProcess.processId() <= 0)
+        return;
+    const int signal = m_installPaused ? SIGCONT : SIGSTOP;
+    if (::kill(-static_cast<pid_t>(m_installProcess.processId()), signal) == 0) {
+        m_installPaused = !m_installPaused;
+        m_installMessage = m_installPaused ? QStringLiteral("Installation paused. Resume when ready.") : QStringLiteral("Installation resumed.");
+        emit installChanged();
+    }
+#endif
+}
+
+void Controller::cancelInstallation()
+{
+#ifdef Q_OS_LINUX
+    if (!m_installRunning || m_installProcess.processId() <= 0)
+        return;
+    m_installCanceled = true;
+    if (m_installPaused)
+        ::kill(-static_cast<pid_t>(m_installProcess.processId()), SIGCONT);
+    ::kill(-static_cast<pid_t>(m_installProcess.processId()), SIGTERM);
+    QTimer::singleShot(4000, this, [this] {
+        if (m_installProcess.state() != QProcess::NotRunning)
+            ::kill(-static_cast<pid_t>(m_installProcess.processId()), SIGKILL);
+    });
+#endif
+}
+
+void Controller::removeInstallation(const QString &id, bool deleteFiles)
+{
+    QJsonObject state = readJson(statePath());
+    const QJsonArray current = state.value(QStringLiteral("installations")).toArray();
+    QJsonObject target;
+    QJsonArray remaining;
+    for (const QJsonValue &value : current) {
+        const QJsonObject item = value.toObject();
+        if (item.value(QStringLiteral("id")).toString() == id)
+            target = item;
+        else
+            remaining.append(item);
+    }
+    if (target.isEmpty()) { setNotice(QStringLiteral("Server installation was not found.")); return; }
+    if (deleteFiles && target.value(QStringLiteral("imported")).toBool()) { setNotice(QStringLiteral("Imported servers can only be forgotten.")); return; }
+    const QString path = QDir::cleanPath(target.value(QStringLiteral("path")).toString());
+    const QString managedRoot = QDir::cleanPath(QDir::homePath() + QStringLiteral("/.local/share/azeroth-control/servers")) + '/';
+    if (deleteFiles && (!path.startsWith(managedRoot) || path == managedRoot.chopped(1))) { setNotice(QStringLiteral("Refusing to delete outside the managed server folder.")); return; }
+    if (state.value(QStringLiteral("activeInstallationId")).toString() == id) {
+        const QString control = path + QStringLiteral("/bin/server-control");
+        if (QFileInfo::exists(control))
+            QProcess::execute(control, {QStringLiteral("stop")});
+    }
+    if (deleteFiles) {
+        const QString envPath = path + QStringLiteral("/install.env");
+        const QString prefix = readEnvValue(envPath, QStringLiteral("CONTAINER_PREFIX"));
+        if (!prefix.isEmpty()) {
+            QProcess::execute(QStringLiteral("podman"), {QStringLiteral("rm"), QStringLiteral("-f"), prefix + QStringLiteral("-worldserver"), prefix + QStringLiteral("-authserver"), prefix + QStringLiteral("-database")});
+            QProcess::execute(QStringLiteral("podman"), {QStringLiteral("volume"), QStringLiteral("rm"), QStringLiteral("-f"), prefix + QStringLiteral("-database-data"), prefix + QStringLiteral("-client-data")});
+        }
+        QStringList images;
+        for (const QString &key : {QStringLiteral("WORLD_IMAGE"), QStringLiteral("AUTH_IMAGE"), QStringLiteral("IMPORT_IMAGE"), QStringLiteral("DATA_IMAGE")}) {
+            const QString image = readEnvValue(envPath, key);
+            if (!image.isEmpty()) images.append(image);
+        }
+        if (!images.isEmpty()) {
+            QStringList arguments{QStringLiteral("rmi")}; arguments.append(images);
+            QProcess::execute(QStringLiteral("podman"), arguments);
+        }
+        const int result = QProcess::execute(QStringLiteral("gio"), {QStringLiteral("trash"), path});
+        if (result != 0) { setNotice(QStringLiteral("Could not move the managed server to Trash.")); return; }
+    }
+    state.insert(QStringLiteral("installations"), remaining);
+    if (state.value(QStringLiteral("activeInstallationId")).toString() == id)
+        state.insert(QStringLiteral("activeInstallationId"), remaining.isEmpty() ? QString() : remaining.first().toObject().value(QStringLiteral("id")).toString());
+    QFile file(statePath() + QStringLiteral(".tmp"));
+    if (file.open(QIODevice::WriteOnly)) { file.write(QJsonDocument(state).toJson(QJsonDocument::Indented)); file.close(); QFile::remove(statePath()); QFile::rename(statePath() + QStringLiteral(".tmp"), statePath()); }
+    reloadInstallations();
+    setNotice(deleteFiles ? QStringLiteral("Server data moved to Trash. Restart Azeroth Control to load another server.") : QStringLiteral("Server removed from Azeroth Control."));
 }
 
 void Controller::serverAction(const QString &action, const QString &realm)
