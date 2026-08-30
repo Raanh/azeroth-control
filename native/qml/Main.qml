@@ -55,6 +55,11 @@ ApplicationWindow {
         {"role":"DPS","classId":4,"specId":1}
     ]
 
+    onPageChanged: {
+        if (control.installations.length === 0 && page !== "install")
+            page = "install"
+    }
+
     function showFirstTimeSetup() {
         if (control.installations.length !== 0)
             return
@@ -261,6 +266,10 @@ ApplicationWindow {
         }
 
         if (command === "back") {
+            if (control.installations.length === 0) {
+                root.showFirstTimeSetup()
+                return
+            }
             if (root.page !== "dashboard") {
                 root.page = "dashboard"
                 dashboardButton.forceActiveFocus()
@@ -314,7 +323,8 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: 315 * root.s
+        width: control.installations.length > 0 ? 315 * root.s : 0
+        visible: control.installations.length > 0
         color: "#070d12"
         border.color: "#17232c"
 
@@ -421,7 +431,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
 
         Text { x: 48 * root.s; y: 38 * root.s; text: "STEAMOS · LOCAL SERVER"; color: root.muted; font.pixelSize: 16 * root.s; font.letterSpacing: 2 }
-        Text { x: 48 * root.s; y: 68 * root.s; text: root.page === "dashboard" ? "Dashboard" : root.page.charAt(0).toUpperCase() + root.page.slice(1); color: root.ink; font.pixelSize: 42 * root.s; font.bold: true }
+        Text { x: 48 * root.s; y: 68 * root.s; text: control.installations.length === 0 ? "Welcome" : root.page === "dashboard" ? "Dashboard" : root.page.charAt(0).toUpperCase() + root.page.slice(1); color: root.ink; font.pixelSize: 42 * root.s; font.bold: true }
 
         Rectangle {
             id: card
@@ -925,7 +935,7 @@ ApplicationWindow {
         Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
     }
 
-    Shortcut { sequence: "Esc"; onActivated: { if (root.page !== "dashboard") root.page = "dashboard"; else root.showMinimized() } }
+    Shortcut { sequence: "Esc"; onActivated: { if (control.installations.length === 0) root.showFirstTimeSetup(); else if (root.page !== "dashboard") root.page = "dashboard"; else root.showMinimized() } }
     Connections {
         target: control
         function onYieldToGame() {
