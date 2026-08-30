@@ -35,6 +35,8 @@ ApplicationWindow {
     property int openGamepadComboInitialIndex: -1
     property var openGamepadSelect: null
     property var deleteInstallationTarget: null
+    property int addonFocusIndex: 0
+    property int addonFocusAction: 1
     property var partyRoles: ["Tank", "Healer", "DPS"]
     property var partyClasses: [
         {"id":1,"name":"Warrior","specs":[{"id":0,"name":"Arms","role":"DPS"},{"id":1,"name":"Fury","role":"DPS"},{"id":2,"name":"Protection","role":"Tank"}]},
@@ -171,6 +173,35 @@ ApplicationWindow {
         return result
     }
 
+    function focusAddonControl(index, action, attempt) {
+        if (!addonList || addonList.count <= 0)
+            return
+        var targetIndex = Math.max(0, Math.min(addonList.count - 1, index))
+        addonFocusIndex = targetIndex
+        addonFocusAction = action
+        addonList.currentIndex = targetIndex
+        addonList.positionViewAtIndex(targetIndex, ListView.Contain)
+        Qt.callLater(function() {
+            var card = addonList.itemAtIndex(targetIndex)
+            if (card) {
+                card.focusAction(action)
+            } else if (attempt < 3) {
+                root.focusAddonControl(targetIndex, action, attempt + 1)
+            }
+        })
+    }
+
+    function focusedAddonIndex() {
+        if (!addonList)
+            return -1
+        for (var i = 0; i < addonList.count; ++i) {
+            var card = addonList.itemAtIndex(i)
+            if (card && card.actionFocused)
+                return i
+        }
+        return -1
+    }
+
     function moveGamepadFocus(direction) {
         var current = root.activeFocusItem
         if (current && (direction === "left" || direction === "right")
@@ -213,6 +244,11 @@ ApplicationWindow {
     function handleGamepad(command) {
         if (command === "page-up") command = "up"
         if (command === "page-down") command = "down"
+
+        if (command === "system") {
+            root.lower()
+            return
+        }
 
         if (root.openGamepadSelect) {
             if (!root.openGamepadSelect.menuOpen) {
@@ -275,6 +311,40 @@ ApplicationWindow {
                 dashboardButton.forceActiveFocus()
             }
             return
+        }
+
+        if (root.page === "addons") {
+            var addonIndex = root.focusedAddonIndex()
+            if ((root.activeFocusItem === addonsButton) && command === "right") {
+                root.focusAddonControl(0, 1, 0)
+                return
+            }
+            if ((root.activeFocusItem === openAddonFolderButton) && (command === "down" || command === "left")) {
+                root.focusAddonControl(0, 1, 0)
+                return
+            }
+            if (addonIndex >= 0) {
+                var addonCardItem = addonList.itemAtIndex(addonIndex)
+                if (command === "down") {
+                    root.focusAddonControl(addonIndex + 1, root.addonFocusAction, 0)
+                    return
+                }
+                if (command === "up") {
+                    if (addonIndex === 0)
+                        openAddonFolderButton.forceActiveFocus()
+                    else
+                        root.focusAddonControl(addonIndex - 1, root.addonFocusAction, 0)
+                    return
+                }
+                if (command === "left" && addonCardItem && addonCardItem.repairVisible) {
+                    root.focusAddonControl(addonIndex, 0, 0)
+                    return
+                }
+                if (command === "right") {
+                    root.focusAddonControl(addonIndex, 1, 0)
+                    return
+                }
+            }
         }
         if (command === "activate") {
             var item = root.activeFocusItem
@@ -816,7 +886,7 @@ ApplicationWindow {
                 property var addonInfo: { var changed = control.data["/api/addons/action"]; return changed && changed.addons ? changed : (control.data["/api/addons"] || {}) }
                 Text { x: 0; y: 0; text: "WoW addon library"; color: root.ink; font.pixelSize: 24 * root.s; font.bold: true }
                 Text { x: 0; y: 38 * root.s; width: parent.width - 260 * root.s; text: control.installations.length === 0 ? "A configured realm supplies the WoW client folder used by the addon library." : addonInfo.clientPath ? "Client: " + addonInfo.clientPath : "Loading configured client…"; color: root.muted; font.pixelSize: 15 * root.s; elide: Text.ElideMiddle }
-                AzButton { anchors.right: parent.right; y: 0; text: "Open addon folder"; width: 220 * root.s; height: 54 * root.s; font.pixelSize: 16 * root.s; enabled: control.installations.length > 0 && addonInfo.configured !== false; onClicked: control.apiPost("addons-folder", "/api/addons/action", {"action":"open-folder"}) }
+                AzButton { id: openAddonFolderButton; anchors.right: parent.right; y: 0; text: "Open addon folder"; width: 220 * root.s; height: 54 * root.s; font.pixelSize: 16 * root.s; enabled: control.installations.length > 0 && addonInfo.configured !== false; onClicked: control.apiPost("addons-folder", "/api/addons/action", {"action":"open-folder"}) }
                 Rectangle {
                     visible: control.installations.length === 0
                     x: 0; y: 92 * root.s; width: parent.width; height: 230 * root.s; radius: 12 * root.s; color: root.raised; border.color: root.edge
@@ -826,6 +896,7 @@ ApplicationWindow {
                     AzButton { x: 24 * root.s; anchors.bottom: parent.bottom; anchors.bottomMargin: 20 * root.s; width: 250 * root.s; height: 56 * root.s; text: "Start first-time setup"; primary: true; font.pixelSize: 17 * root.s; onClicked: root.showFirstTimeSetup() }
                 }
                 ListView {
+                    id: addonList
                     x: 0; y: 78 * root.s; width: parent.width; height: parent.height - 78 * root.s; spacing: 12 * root.s; clip: true
                     visible: control.installations.length > 0
                     model: parent.addonInfo.addons || []
@@ -833,6 +904,17 @@ ApplicationWindow {
                         id: addonCard
                         required property int index
                         required property var modelData
+                        property bool actionFocused: addonRepairButton.activeFocus || addonActionButton.activeFocus
+                        property bool repairVisible: addonRepairButton.visible
+                        function focusAction(action) {
+                            if (action === 0 && addonRepairButton.visible) {
+                                root.addonFocusAction = 0
+                                addonRepairButton.forceActiveFocus()
+                            } else {
+                                root.addonFocusAction = 1
+                                addonActionButton.forceActiveFocus()
+                            }
+                        }
                         width: ListView.view.width; height: 132 * root.s; radius: 10 * root.s; color: root.raised; border.color: modelData.installed ? "#2d8d60" : root.edge
                         Text { x: 18 * root.s; y: 14 * root.s; text: modelData.name; color: root.ink; font.pixelSize: 20 * root.s; font.bold: true }
                         Text { x: 18 * root.s; y: 46 * root.s; width: parent.width - 390 * root.s; text: modelData.description; color: root.ink; font.pixelSize: 15 * root.s; wrapMode: Text.Wrap }
@@ -842,11 +924,13 @@ ApplicationWindow {
                         Row {
                             anchors.right: parent.right; anchors.rightMargin: 16 * root.s; y: 52 * root.s; spacing: 10 * root.s
                             AzButton {
+                                id: addonRepairButton
                                 visible: modelData.installed; width: 145 * root.s; height: 54 * root.s; text: "Repair"; font.pixelSize: 16 * root.s; enabled: !control.busy
                                 onActiveFocusChanged: if (activeFocus) addonCard.ListView.view.positionViewAtIndex(index, ListView.Contain)
                                 onClicked: control.apiPost("addons", "/api/addons/action", {"action":"repair", "id": modelData.id})
                             }
                             AzButton {
+                                id: addonActionButton
                                 width: 155 * root.s; height: 54 * root.s; text: modelData.installed ? "Remove" : "Install"; danger: modelData.installed; primary: !modelData.installed; font.pixelSize: 16 * root.s; enabled: !control.busy
                                 onActiveFocusChanged: if (activeFocus) addonCard.ListView.view.positionViewAtIndex(index, ListView.Contain)
                                 onClicked: control.apiPost("addons", "/api/addons/action", {"action": modelData.installed ? "remove" : "install", "id": modelData.id})

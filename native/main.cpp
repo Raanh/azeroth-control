@@ -131,6 +131,9 @@ private:
         case BTN_WEST: m_controller->dispatchGamepad(QStringLiteral("keyboard")); break; // X
         case BTN_TL: m_controller->dispatchGamepad(QStringLiteral("page-up")); break;
         case BTN_TR: m_controller->dispatchGamepad(QStringLiteral("page-down")); break;
+        // Do not grab or consume the Guide/Steam button. Lowering our window in
+        // parallel lets the SteamOS Home surface win Gamescope's z-order.
+        case BTN_MODE: m_controller->dispatchGamepad(QStringLiteral("system")); break;
         default: break;
         }
     }
