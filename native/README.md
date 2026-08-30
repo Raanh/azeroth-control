@@ -25,14 +25,10 @@ Steam. This keeps Gamescope focus and lifecycle ownership unambiguous.
 This directory is an active preview. Expect unfinished screens and SteamOS,
 gamepad, focus, and installer bugs while the migration is being completed.
 
-The SteamOS wrapper keeps only Steam's 64-bit overlay renderer in `LD_PRELOAD`.
-Loading both architectures can stall Qt, while removing both prevents Guide/Home
-from opening a correctly focused Steam overlay for the non-Steam shortcut.
-
-SteamOS currently has an upstream focus bug when two non-Steam shortcuts run at
-the same time. In Gaming Mode, Guide/Home therefore exits only the Azeroth
-Control UI and returns to Steam; managed server containers continue running so
-the user can launch WoW normally.
+Steam/Home is left entirely to Steam Input and Gamescope. Azeroth Control does
+not bind the Guide button, quit on focus loss, or inject Steam's overlay renderer.
+This allows the control UI and the user's separately managed WoW shortcut to stay
+open at the same time.
 
 Build with Qt 6:
 

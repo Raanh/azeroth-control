@@ -37,26 +37,6 @@ ApplicationWindow {
     property var deleteInstallationTarget: null
     property int addonFocusIndex: 0
     property int addonFocusAction: 1
-    property bool hasBeenActive: false
-
-    onActiveChanged: {
-        if (active) {
-            hasBeenActive = true
-            exitToSteamTimer.stop()
-        } else if (hasBeenActive && control.installations.length > 0 && !control.installRunning) {
-            exitToSteamTimer.restart()
-        }
-    }
-
-    Timer {
-        id: exitToSteamTimer
-        interval: 250
-        repeat: false
-        onTriggered: {
-            if (!root.active && control.installations.length > 0 && !control.installRunning)
-                Qt.quit()
-        }
-    }
     property var partyRoles: ["Tank", "Healer", "DPS"]
     property var partyClasses: [
         {"id":1,"name":"Warrior","specs":[{"id":0,"name":"Arms","role":"DPS"},{"id":1,"name":"Fury","role":"DPS"},{"id":2,"name":"Protection","role":"Tank"}]},
@@ -264,11 +244,6 @@ ApplicationWindow {
     function handleGamepad(command) {
         if (command === "page-up") command = "up"
         if (command === "page-down") command = "down"
-
-        if (command === "exit-to-steam") {
-            Qt.quit()
-            return
-        }
 
         if (root.openGamepadSelect) {
             if (!root.openGamepadSelect.menuOpen) {
@@ -1041,11 +1016,6 @@ ApplicationWindow {
         Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
     }
 
-    Shortcut {
-        sequence: "Home"
-        context: Qt.ApplicationShortcut
-        onActivated: Qt.quit()
-    }
     Shortcut { sequence: "Esc"; onActivated: { if (control.installations.length === 0) root.showFirstTimeSetup(); else if (root.page !== "dashboard") root.page = "dashboard"; else root.showMinimized() } }
     Connections {
         target: control
