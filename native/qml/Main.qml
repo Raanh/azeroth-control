@@ -20,6 +20,11 @@ ApplicationWindow {
     property string installClientPath: "/home/deck/Games/AzerothCore-WotLK-HD"
     property string firstAccount: ""
     property string firstPassword: ""
+    property var installProfiles: [
+        {"id":"progression", "name":"Progressive Level 1–80"},
+        {"id":"endgame", "name":"Instant Level 80"},
+        {"id":"custom", "name":"Custom Realm"}
+    ]
     property bool queueLfg: true
     property bool queueBg: true
     property bool autoQueueBg: false
@@ -561,7 +566,12 @@ ApplicationWindow {
                 visible: root.page === "install"
                 Text { text: "Create a new local server"; color: root.ink; font.pixelSize: 24 * root.s }
                 Text { text: "Profile"; color: root.muted; font.pixelSize: 17 * root.s }
-                ComboBox { id: installProfile; width: 430 * root.s; height: 58 * root.s; model: ["progression", "endgame", "custom"]; font.pixelSize: 18 * root.s }
+                AzSelect {
+                    id: installProfile
+                    width: 430 * root.s; height: 58 * root.s
+                    choices: root.installProfiles; selectedIndex: 0; font.pixelSize: 18 * root.s
+                    onSelectionAccepted: function(index) { selectedIndex = index }
+                }
                 Text { text: "WoW 3.3.5a client folder"; color: root.muted; font.pixelSize: 17 * root.s }
                 TextField { id: installClient; width: 800 * root.s; height: 58 * root.s; text: root.installClientPath; font.pixelSize: 17 * root.s; selectByMouse: true }
                 Row { spacing: 14 * root.s
@@ -571,7 +581,7 @@ ApplicationWindow {
                 Text { text: "Bot count: " + Math.round(installBots.value); color: root.ink; font.pixelSize: 22 * root.s }
                 Slider { id: installBots; width: 720 * root.s; from: 0; to: 2000; stepSize: 50; value: 500; live: true; KeyNavigation.down: installButton }
                 Text { text: "The installer estimates disk usage and creates the managed containers. WoW files are never downloaded or added to Steam."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
-                AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start installation"; primary: true; width: 250 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: control.installServer({"profile": installProfile.currentText, "clientPath": installClient.text, "bots": Math.round(installBots.value), "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": "Azeroth " + installProfile.currentText, "accountName": root.firstAccount, "accountPassword": root.firstPassword}); KeyNavigation.up: installBots }
+                AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start / Resume installation"; primary: true; width: 290 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: { var chosenProfile = root.installProfiles[installProfile.selectedIndex]; control.installServer({"profile": chosenProfile.id, "clientPath": installClient.text, "bots": Math.round(installBots.value), "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": "Azeroth " + chosenProfile.name, "accountName": root.firstAccount, "accountPassword": root.firstPassword}) } KeyNavigation.up: installBots }
                 ProgressBar { width: 800 * root.s; from: 0; to: 100; value: control.installProgress; visible: control.installRunning || control.installProgress > 0 }
                 Text { text: control.installMessage; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap; visible: control.installMessage.length > 0 }
             }

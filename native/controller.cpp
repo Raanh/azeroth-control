@@ -135,8 +135,22 @@ void Controller::installServer(const QVariantMap &input)
         selection.insert(QStringLiteral("profile"), QStringLiteral("progression"));
     if (!selection.contains(QStringLiteral("installRoot")))
         selection.insert(QStringLiteral("installRoot"), QDir::homePath() + QStringLiteral("/.local/share/azeroth-control"));
-    if (!selection.contains(QStringLiteral("serverId")))
-        selection.insert(QStringLiteral("serverId"), QStringLiteral("native-%1").arg(QDateTime::currentDateTimeUtc().toString("yyyyMMddhhmmss")));
+    if (!selection.contains(QStringLiteral("serverId"))) {
+        const QDir serverDirectory(selection.value(QStringLiteral("installRoot")).toString() + QStringLiteral("/servers"));
+        const QFileInfoList candidates = serverDirectory.entryInfoList({QStringLiteral("native-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+        for (const QFileInfo &candidate : candidates) {
+            if (QFile::exists(candidate.filePath() + QStringLiteral("/.install-checkpoints/complete")))
+                continue;
+            const QJsonObject previous = readJson(candidate.filePath() + QStringLiteral("/install-selection.json"));
+            if (previous.value(QStringLiteral("profile")).toString() == selection.value(QStringLiteral("profile")).toString()
+                && previous.value(QStringLiteral("clientPath")).toString() == selection.value(QStringLiteral("clientPath")).toString()) {
+                selection.insert(QStringLiteral("serverId"), candidate.fileName());
+                break;
+            }
+        }
+        if (!selection.contains(QStringLiteral("serverId")))
+            selection.insert(QStringLiteral("serverId"), QStringLiteral("native-%1").arg(QDateTime::currentDateTimeUtc().toString("yyyyMMddhhmmss")));
+    }
     if (!selection.contains(QStringLiteral("serverName")))
         selection.insert(QStringLiteral("serverName"), QStringLiteral("Azeroth Progression"));
     if (!selection.contains(QStringLiteral("bots")))
@@ -161,6 +175,16 @@ void Controller::installServer(const QVariantMap &input)
     }
     config.write(QJsonDocument(QJsonObject::fromVariantMap(selection)).toJson(QJsonDocument::Indented));
     config.close();
+    const QString logDirectory = selection.value(QStringLiteral("installRoot")).toString() + QStringLiteral("/logs");
+    QDir().mkpath(logDirectory);
+    const QString logPath = logDirectory + QStringLiteral("/install-%1.log").arg(selection.value(QStringLiteral("serverId")).toString());
+    {
+        QFile log(logPath);
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            log.write(QStringLiteral("\n=== Installation attempt %1 ===\n")
+                .arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODate)).toUtf8());
+        }
+    }
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("AZEROTH_CATALOG"), qEnvironmentVariable("AZEROTH_CONTROL_CATALOG", installer.left(installer.lastIndexOf('/')) + QStringLiteral("/../manifests/catalog.json")));
@@ -173,8 +197,13 @@ void Controller::installServer(const QVariantMap &input)
     m_installMessage = QStringLiteral("Preparing installation…");
     setBusy(true);
     emit installChanged();
-    connect(&m_installProcess, &QProcess::readyRead, this, [this] {
-        const QString output = QString::fromUtf8(m_installProcess.readAll()).trimmed();
+    disconnect(&m_installProcess, nullptr, this, nullptr);
+    connect(&m_installProcess, &QProcess::readyRead, this, [this, logPath] {
+        const QByteArray rawOutput = m_installProcess.readAll();
+        QFile log(logPath);
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append))
+            log.write(rawOutput);
+        const QString output = QString::fromUtf8(rawOutput).trimmed();
         if (output.isEmpty()) return;
         const QStringList lines = output.split('\n', Qt::SkipEmptyParts);
         m_installMessage = lines.constLast().trimmed();
@@ -185,7 +214,7 @@ void Controller::installServer(const QVariantMap &input)
         emit installChanged();
     });
     connect(&m_installProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
-        [this, configPath](int code, QProcess::ExitStatus) {
+        [this, configPath, logPath](int code, QProcess::ExitStatus) {
             if (code == 0) {
                 const QJsonObject selection = readJson(configPath);
                 const QString serverRoot = QDir::cleanPath(selection.value(QStringLiteral("installRoot")).toString()
@@ -230,13 +259,17 @@ void Controller::installServer(const QVariantMap &input)
                 }
                 startBackend();
             }
+            const QString failureDetail = m_installMessage;
             m_installRunning = false;
             m_installProgress = code == 0 ? 100 : m_installProgress;
-            m_installMessage = code == 0 ? QStringLiteral("Installation completed. Restart the native app to load the new server.") : QStringLiteral("Installation failed. Open the installation log and resume the plan.");
+            m_installMessage = code == 0
+                ? QStringLiteral("Installation completed. Restart the native app to load the new server.")
+                : QStringLiteral("Installation failed: %1 · Log: %2").arg(failureDetail, logPath);
             setBusy(false);
             emit installChanged();
             setNotice(m_installMessage);
-            QFile::remove(configPath);
+            if (code == 0)
+                QFile::remove(configPath);
         });
     m_installProcess.start();
 }

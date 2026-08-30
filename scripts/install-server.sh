@@ -4,6 +4,7 @@ set -Eeuo pipefail
 CONFIG_FILE="${1:?Missing installation configuration}"
 CATALOG_FILE="${AZEROTH_CATALOG:?Missing catalog path}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PARTY_BRIDGE_SOURCE="$SCRIPT_DIR/../resources/modules/mod-azeroth-control-bridge"
 
 json_value() {
     python3 - "$CONFIG_FILE" "$1" <<'PY'
@@ -66,6 +67,19 @@ fi
 for command in git podman python3; do
     command -v "$command" >/dev/null 2>&1 || { printf 'Required command is missing: %s\n' "$command" >&2; exit 2; }
 done
+for bundled_file in \
+    "$PARTY_BRIDGE_SOURCE/VERSION" \
+    "$PARTY_BRIDGE_SOURCE/src/mod_azeroth_control_bridge.cpp" \
+    "$PARTY_BRIDGE_SOURCE/src/AzerothControlBridge.cpp" \
+    "$SCRIPT_DIR/server-control-managed" \
+    "$SCRIPT_DIR/autologin-managed" \
+    "$SCRIPT_DIR/update-server-managed" \
+    "$SCRIPT_DIR/repair-server-managed"; do
+    [[ -f "$bundled_file" ]] || {
+        printf 'Azeroth Control installation bundle is incomplete: missing %s\n' "$bundled_file" >&2
+        exit 2
+    }
+done
 
 mkdir -p "$INSTALL_ROOT"/{servers,cache,backups,logs,state}
 SERVER_ROOT="$INSTALL_ROOT/servers/$SERVER_ID"
@@ -110,7 +124,6 @@ fi
 # Party Builder is backed by a small, local-only world-console command module.
 # It is part of Azeroth Control itself (not a downloadable third-party module),
 # so every managed server gets the same safe bridge implementation.
-PARTY_BRIDGE_SOURCE="$SCRIPT_DIR/../resources/modules/mod-azeroth-control-bridge"
 PARTY_BRIDGE_TARGET="$CORE/modules/mod-azeroth-control-bridge"
 PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$PARTY_BRIDGE_SOURCE/VERSION")"
 INSTALLED_PARTY_BRIDGE_VERSION=""

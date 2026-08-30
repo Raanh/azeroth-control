@@ -54,7 +54,7 @@ public:
     double dropRate() const { return m_dropRate; }
     double spawnRate() const { return m_spawnRate; }
     QVariantMap data() const { return m_data; }
-    QString version() const { return QStringLiteral("0.4.0-native-preview"); }
+    QString version() const { return QStringLiteral("0.4.0-preview.1"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});
