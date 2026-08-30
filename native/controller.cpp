@@ -231,6 +231,7 @@ void Controller::installServer(const QVariantMap &input)
     m_installCanceled = false;
     m_installProgress = 0;
     m_installMessage = QStringLiteral("Preparing installation…");
+    m_installParseBuffer.clear();
     setBusy(true);
     emit installChanged();
     disconnect(&m_installProcess, nullptr, this, nullptr);
@@ -239,14 +240,48 @@ void Controller::installServer(const QVariantMap &input)
         QFile log(logPath);
         if (log.open(QIODevice::WriteOnly | QIODevice::Append))
             log.write(rawOutput);
-        const QString output = QString::fromUtf8(rawOutput).trimmed();
-        if (output.isEmpty()) return;
+        m_installParseBuffer += QString::fromUtf8(rawOutput);
+        const qsizetype completeEnd = m_installParseBuffer.lastIndexOf('\n');
+        if (completeEnd < 0) return;
+        QString output = m_installParseBuffer.left(completeEnd + 1);
+        m_installParseBuffer = m_installParseBuffer.mid(completeEnd + 1);
+        static const QRegularExpression ansiPattern(QStringLiteral("\\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+        output.remove(ansiPattern);
         const QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+        if (lines.isEmpty()) return;
         m_installMessage = lines.constLast().trimmed();
-        static const QRegularExpression stepPattern(QStringLiteral("Step\\s+(\\d+)\\s*/\\s*(\\d+)"), QRegularExpression::CaseInsensitiveOption);
-        const QRegularExpressionMatch match = stepPattern.match(output);
-        if (match.hasMatch())
-            m_installProgress = qRound(match.captured(1).toDouble() * 100.0 / qMax(1, match.captured(2).toInt()));
+
+        // Only Azeroth Control's own [N/6] lines describe top-level installer
+        // stages. Podman also prints "STEP N/N", which previously made the bar
+        // jump to 100% while the long C++ build was still running.
+        static const QRegularExpression stagePattern(QStringLiteral("(?:^|\\n)\\[(\\d+)/6\\]\\s+([^\\n]+)"));
+        QRegularExpressionMatchIterator stages = stagePattern.globalMatch(output);
+        while (stages.hasNext()) {
+            const QRegularExpressionMatch stage = stages.next();
+            const int number = stage.captured(1).toInt();
+            static constexpr int StageProgress[] = {0, 2, 5, 8, 10, 88, 98};
+            if (number >= 1 && number <= 6)
+                m_installProgress = qMax(m_installProgress, StageProgress[number]);
+        }
+
+        static const QRegularExpression buildPattern(
+            QStringLiteral("\\[(\\d+)/(\\d+)\\]\\s+(?:Building|Linking|Generating)"),
+            QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatchIterator builds = buildPattern.globalMatch(output);
+        QRegularExpressionMatch latestBuild;
+        while (builds.hasNext()) latestBuild = builds.next();
+        if (latestBuild.hasMatch()) {
+            const int current = latestBuild.captured(1).toInt();
+            const int total = qMax(1, latestBuild.captured(2).toInt());
+            const int buildPercent = qBound(0, qRound(current * 100.0 / total), 100);
+            // Compilation occupies most of the first-install time, so give it
+            // most of the visual range. Remaining image/database work gets the
+            // final 18%; 100 is reserved for a successful process exit.
+            m_installProgress = qMax(m_installProgress, 10 + qRound(buildPercent * 0.72));
+            m_installMessage = QStringLiteral("Compiling server engine — %1 / %2 objects (%3%)")
+                .arg(current).arg(total).arg(buildPercent);
+        }
+        m_installProgress = qMin(m_installProgress, 99);
         emit installChanged();
     });
     connect(&m_installProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
