@@ -25,6 +25,10 @@ Steam. This keeps Gamescope focus and lifecycle ownership unambiguous.
 This directory is an active preview. Expect unfinished screens and SteamOS,
 gamepad, focus, and installer bugs while the migration is being completed.
 
+The SteamOS wrapper keeps only Steam's 64-bit overlay renderer in `LD_PRELOAD`.
+Loading both architectures can stall Qt, while removing both prevents Guide/Home
+from opening a correctly focused Steam overlay for the non-Steam shortcut.
+
 Build with Qt 6:
 
 ```sh

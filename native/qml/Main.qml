@@ -8,10 +8,6 @@ ApplicationWindow {
     height: 1080
     color: "#091017"
     title: "Azeroth Control"
-    onActiveChanged: {
-        if (!active)
-            lower()
-    }
 
     property real s: Math.max(0.8, Math.min(width / 1920, height / 1080))
     property color gold: "#e6a126"
@@ -248,11 +244,6 @@ ApplicationWindow {
     function handleGamepad(command) {
         if (command === "page-up") command = "up"
         if (command === "page-down") command = "down"
-
-        if (command === "system") {
-            root.lower()
-            return
-        }
 
         if (root.openGamepadSelect) {
             if (!root.openGamepadSelect.menuOpen) {
@@ -1025,16 +1016,6 @@ ApplicationWindow {
         Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
     }
 
-    Shortcut {
-        sequence: "Home"
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            // Some Steam Input layouts expose Guide as a Qt Home key instead
-            // of BTN_MODE. Consume it before Controls move list focus and yield
-            // our Gamescope z-order to the SteamOS Home surface.
-            root.lower()
-        }
-    }
     Shortcut { sequence: "Esc"; onActivated: { if (control.installations.length === 0) root.showFirstTimeSetup(); else if (root.page !== "dashboard") root.page = "dashboard"; else root.showMinimized() } }
     Connections {
         target: control

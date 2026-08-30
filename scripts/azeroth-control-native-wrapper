@@ -14,9 +14,15 @@ unset WAYLAND_DISPLAY
 unset GAMESCOPE_WAYLAND_DISPLAY
 unset GAMESCOPE_DISPLAY_DISABLED
 unset ENABLE_GAMESCOPE_WSI
-# Steam injects both 32-bit and 64-bit gameoverlayrenderer libraries into
-# shortcut processes. They are useful for games but can stall Qt's xcb plugin
-# before the first window is created.
-unset LD_PRELOAD
+# Steam injects both renderer architectures. Azeroth Control is 64-bit, so the
+# 32-bit renderer is invalid here; unsetting everything also disables the real
+# Steam overlay and makes Guide/Home open behind the app. Load only the matching
+# renderer so Gamescope and Steam own overlay focus normally.
+STEAM_OVERLAY_64="$HOME/.local/share/Steam/ubuntu12_64/gameoverlayrenderer.so"
+if [[ -f "$STEAM_OVERLAY_64" ]]; then
+    export LD_PRELOAD="$STEAM_OVERLAY_64"
+else
+    unset LD_PRELOAD
+fi
 
 exec "$EXECUTABLE" --fullscreen "$@"
