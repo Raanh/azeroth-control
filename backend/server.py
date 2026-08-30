@@ -47,8 +47,13 @@ ADDON_CATALOG = [
     {"id": "consoleportlk", "name": "ConsolePortLK", "version": "1.5.0-rc2", "category": "Gamepad", "description": "Controller action bars, menus and navigation for WoW 3.3.5a.", "note": "Recommended for Steam Deck and living-room play.", "sourceUrl": "https://github.com/leoaviana/ConsolePortLK", "downloadUrl": "https://github.com/leoaviana/ConsolePortLK/releases/download/1.5.0-rc2/ConsolePortLK-1.5.0-rc2.zip", "sha256": "9ee20bb1f3c5c5b8d45fcc5980a07bb90d49a707e120613453177c05fea6497f", "folders": ["ConsolePort", "ConsolePortAdvanced", "ConsolePortBar", "ConsolePortHelp", "ConsolePortKeyboard", "ConsolePortLoader", "ConsolePortUI_Loot", "ConsolePortUI_Menu"]},
     {"id": "questiex", "name": "Questie-X", "version": "1.6.4", "category": "Questing", "description": "Quest objectives, map markers and tracker support.", "note": "Private-server build with a 3.3.5a-compatible TOC.", "sourceUrl": "https://github.com/Xurkon/Questie-X", "downloadUrl": "https://github.com/Xurkon/Questie-X/releases/download/v1.6.4/Questie-X-1.6.4.zip", "sha256": "621bf504c43da8d7e34c06b48aeb7dd85cb45b568d0f6a8630a7cfea4143f65f", "folders": ["Questie-X"]},
     {"id": "refined-blizz-plates", "name": "RefinedBlizzPlates", "version": "1.11.2", "category": "Interface", "description": "Modern readable Blizzard-style nameplates for WotLK.", "note": "Configure it in game after restarting WoW.", "sourceUrl": "https://github.com/KhalGH/RefinedBlizzPlates-WotLK", "downloadUrl": "https://github.com/KhalGH/RefinedBlizzPlates-WotLK/releases/download/v1.11.2/RefinedBlizzPlates-v1.11.2.zip", "sha256": "5f5eb1527a997a6e0439966910ec9ea506b577240c0c0e1a0b0e5c2f915ba39a", "folders": ["!!RefinedBlizzPlates"]},
-    {"id": "ffxiv-controller", "name": "Azeroth FFXIV Crossbar", "version": "0.1.0", "category": "Gamepad", "description": "FFXIV-style L2/R2 crossbar preset for ConsolePortLK.", "note": "Install ConsolePortLK first; Steam Input layout confirmation remains manual.", "sourceUrl": "https://github.com/Raanh/azeroth-control", "bundledFolder": "AzerothFFXIVController", "folders": ["AzerothFFXIVController"]},
+    {"id": "ffxiv-controller", "name": "Azeroth FFXIV Crossbar", "version": "0.1.0", "category": "Gamepad", "description": "FFXIV-style L2/R2 crossbar preset for ConsolePortLK.", "note": "Installs ConsolePortLK when needed, backs up WTF and adds Steam Input templates.", "sourceUrl": "https://github.com/Raanh/azeroth-control", "bundledFolder": "AzerothFFXIVController", "folders": ["AzerothFFXIVController"]},
 ]
+
+CONTROLLER_TEMPLATE_TYPES = (
+    "controller_neptune", "controller_xboxone", "controller_xbox360",
+    "controller_ps4", "controller_ps5", "controller_switch_pro", "controller_generic",
+)
 
 
 def addon_paths():
@@ -68,8 +73,67 @@ def addon_payload() -> dict:
         item = dict(addon)
         item["installed"] = all((addons / folder).is_dir() for folder in addon["folders"])
         item["installedVersion"] = records.get(addon["id"], {}).get("version", "")
+        item["repairAvailable"] = item["installed"]
+        if addon["id"] == "ffxiv-controller":
+            templates = HOME / ".local/share/Steam/controller_base/templates"
+            item["steamTemplatesInstalled"] = sum(
+                (templates / f"{kind}_azeroth_ffxiv.vdf").is_file()
+                for kind in CONTROLLER_TEMPLATE_TYPES
+            )
+            item["steamTemplatesExpected"] = len(CONTROLLER_TEMPLATE_TYPES)
         entries.append(item)
     return {"clientPath": str(client), "addonsPath": str(addons), "addons": entries}
+
+
+def install_controller_preset(client: Path, addons: Path, records: dict, records_path: Path) -> None:
+    consoleport = next(item for item in ADDON_CATALOG if item["id"] == "consoleportlk")
+    if not all((addons / folder).is_dir() for folder in consoleport["folders"]):
+        change_addon("consoleportlk", "install")
+        try: records.update(json.loads(records_path.read_text()))
+        except (OSError, json.JSONDecodeError): pass
+
+    generation = str(int(time.time() * 1000))
+    backup = client / "Interface" / ".azeroth-control-backups" / f"ffxiv-controller-{generation}"
+    source = APP_ROOT / "resources/addons/AzerothFFXIVController"
+    source_template = APP_ROOT / "resources/controller/azeroth_ffxiv_crossbar.vdf.in"
+    target = addons / "AzerothFFXIVController"
+    wtf = client / "WTF"
+    if not (source / "AzerothFFXIVController.toc").is_file() or not source_template.is_file():
+        raise ValueError("The packaged FFXIV controller preset is incomplete")
+    if target.exists() or wtf.exists(): backup.mkdir(parents=True, exist_ok=True)
+    if target.exists(): shutil.move(str(target), str(backup / target.name))
+    if wtf.exists(): shutil.copytree(wtf, backup / "WTF")
+    shutil.copytree(source, target)
+    (target / "Generation.lua").write_text(
+        f"AZEROTH_FFXIV_PRESET_GENERATION = {json.dumps(generation)}\n"
+    )
+
+    template_body = source_template.read_text()
+    templates = HOME / ".local/share/Steam/controller_base/templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    installed_templates = 0
+    for kind in CONTROLLER_TEMPLATE_TYPES:
+        template = templates / f"{kind}_azeroth_ffxiv.vdf"
+        if template.exists():
+            steam_backup = backup / "steam-input-templates"
+            steam_backup.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(template, steam_backup / template.name)
+        template.write_text(template_body.replace("__CONTROLLER_TYPE__", kind))
+        installed_templates += 1
+    records["ffxiv-controller"] = {
+        "version": "0.1.0", "installedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "generation": generation, "folders": ["AzerothFFXIVController"],
+        "backupPath": str(backup) if backup.exists() else "", "steamTemplates": installed_templates,
+    }
+
+
+def remove_controller_templates(backup: Path) -> None:
+    templates = HOME / ".local/share/Steam/controller_base/templates"
+    for kind in CONTROLLER_TEMPLATE_TYPES:
+        target = templates / f"{kind}_azeroth_ffxiv.vdf"
+        if target.exists():
+            backup.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(target), str(backup / target.name))
 
 
 def change_addon(addon_id: str, action: str) -> dict:
@@ -84,8 +148,13 @@ def change_addon(addon_id: str, action: str) -> dict:
         for folder in addon["folders"]:
             target = addons / folder
             if target.exists(): backup.mkdir(parents=True, exist_ok=True); shutil.move(str(target), str(backup / folder))
+        if addon_id == "ffxiv-controller": remove_controller_templates(backup / "steam-input-templates")
         records.pop(addon_id, None)
-    elif action == "install":
+    elif action in {"install", "repair"}:
+        if addon_id == "ffxiv-controller":
+            install_controller_preset(client, addons, records, records_path)
+            records_path.write_text(json.dumps(records, indent=2))
+            return addon_payload()
         with tempfile.TemporaryDirectory(prefix="azeroth-addon-") as temporary:
             extracted = Path(temporary) / "extracted"
             if addon.get("bundledFolder"):

@@ -799,13 +799,28 @@ ApplicationWindow {
                     x: 0; y: 78 * root.s; width: parent.width; height: parent.height - 78 * root.s; spacing: 12 * root.s; clip: true
                     model: parent.addonInfo.addons || []
                     delegate: Rectangle {
+                        id: addonCard
+                        required property int index
                         required property var modelData
-                        width: ListView.view.width; height: 116 * root.s; radius: 10 * root.s; color: root.raised; border.color: modelData.installed ? "#2d8d60" : root.edge
+                        width: ListView.view.width; height: 132 * root.s; radius: 10 * root.s; color: root.raised; border.color: modelData.installed ? "#2d8d60" : root.edge
                         Text { x: 18 * root.s; y: 14 * root.s; text: modelData.name; color: root.ink; font.pixelSize: 20 * root.s; font.bold: true }
-                        Text { x: 18 * root.s; y: 46 * root.s; width: parent.width - 210 * root.s; text: modelData.description; color: root.ink; font.pixelSize: 15 * root.s; wrapMode: Text.Wrap }
-                        Text { x: 18 * root.s; y: 82 * root.s; width: parent.width - 210 * root.s; text: modelData.note; color: root.muted; font.pixelSize: 13 * root.s; elide: Text.ElideRight }
+                        Text { x: 18 * root.s; y: 46 * root.s; width: parent.width - 390 * root.s; text: modelData.description; color: root.ink; font.pixelSize: 15 * root.s; wrapMode: Text.Wrap }
+                        Text { x: 18 * root.s; y: 82 * root.s; width: parent.width - 390 * root.s; text: modelData.note; color: root.muted; font.pixelSize: 13 * root.s; elide: Text.ElideRight }
+                        Text { x: 18 * root.s; y: 106 * root.s; visible: modelData.id === "ffxiv-controller"; text: "Steam Input templates: " + (modelData.steamTemplatesInstalled || 0) + " / " + (modelData.steamTemplatesExpected || 7); color: (modelData.steamTemplatesInstalled || 0) === (modelData.steamTemplatesExpected || 7) ? "#58d38c" : root.gold; font.pixelSize: 13 * root.s }
                         Text { anchors.right: parent.right; anchors.rightMargin: 22 * root.s; y: 14 * root.s; text: modelData.installed ? "INSTALLED " + (modelData.installedVersion || "") : "v" + modelData.version; color: modelData.installed ? "#58d38c" : root.gold; font.pixelSize: 13 * root.s; font.bold: true }
-                        AzButton { anchors.right: parent.right; anchors.rightMargin: 16 * root.s; y: 48 * root.s; width: 155 * root.s; height: 52 * root.s; text: modelData.installed ? "Remove" : "Install"; danger: modelData.installed; primary: !modelData.installed; font.pixelSize: 16 * root.s; enabled: !control.busy; onClicked: control.apiPost("addons", "/api/addons/action", {"action": modelData.installed ? "remove" : "install", "id": modelData.id}) }
+                        Row {
+                            anchors.right: parent.right; anchors.rightMargin: 16 * root.s; y: 52 * root.s; spacing: 10 * root.s
+                            AzButton {
+                                visible: modelData.installed; width: 145 * root.s; height: 54 * root.s; text: "Repair"; font.pixelSize: 16 * root.s; enabled: !control.busy
+                                onActiveFocusChanged: if (activeFocus) addonCard.ListView.view.positionViewAtIndex(index, ListView.Contain)
+                                onClicked: control.apiPost("addons", "/api/addons/action", {"action":"repair", "id": modelData.id})
+                            }
+                            AzButton {
+                                width: 155 * root.s; height: 54 * root.s; text: modelData.installed ? "Remove" : "Install"; danger: modelData.installed; primary: !modelData.installed; font.pixelSize: 16 * root.s; enabled: !control.busy
+                                onActiveFocusChanged: if (activeFocus) addonCard.ListView.view.positionViewAtIndex(index, ListView.Contain)
+                                onClicked: control.apiPost("addons", "/api/addons/action", {"action": modelData.installed ? "remove" : "install", "id": modelData.id})
+                            }
+                        }
                     }
                 }
             }

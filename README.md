@@ -93,7 +93,6 @@ module authors.
 - Move replaced or removed addon folders into a recoverable local backup.
 - Install the bundled **Azeroth Dungeon Guide**, a large controller-friendly
   Dynamic/Fast/Careful/Manual run selector shown when entering a dungeon.
-- Detect a user-created WoW Steam shortcut when opening its Steam Input setup.
 - Install the optional **Azeroth FFXIV Crossbar** preset, including:
   - a controller-friendly triple crossbar for ConsolePortLK;
   - L2, R2, and L2+R2 skill banks;
@@ -102,8 +101,10 @@ module authors.
   - local Steam Input templates for Steam Deck, Xbox, PlayStation, Switch Pro,
     and generic controllers.
 - Back up the full client `WTF` folder before applying the crossbar preset.
-- Open Steam Input for the exact WoW shortcut so the user can confirm the
-  local layout without Azeroth Control changing Steam Cloud controller data.
+- Repair any installed addon from the native library; FFXIV preset status also
+  reports how many local Steam Input templates are installed.
+- Leave the final Steam Input layout selection to the user-created WoW shortcut,
+  without Azeroth Control editing Steam shortcuts or Steam Cloud controller data.
 
 ### TV and controller interface
 
@@ -234,10 +235,10 @@ exposed to the server module.
 
 ## FFXIV-style ConsolePortLK setup
 
-Open **Addons** and select **Install & Open Steam Input** on the FFXIV-style
-Crossbar card. Azeroth Control will install ConsolePortLK if it is missing,
-install its own small in-game preset addon, save a full WTF backup, and add
-local controller templates to Steam.
+Open **Addons** and select **Install** on the FFXIV-style Crossbar card. Azeroth
+Control will install ConsolePortLK if it is missing, install its own small
+in-game preset addon, save a full WTF backup, and add local controller templates
+to Steam. Use **Repair** to safely regenerate the addon and templates later.
 
 Steam deliberately requires one final confirmation:
 
