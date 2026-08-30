@@ -131,6 +131,7 @@ private:
         case BTN_WEST: m_controller->dispatchGamepad(QStringLiteral("keyboard")); break; // X
         case BTN_TL: m_controller->dispatchGamepad(QStringLiteral("page-up")); break;
         case BTN_TR: m_controller->dispatchGamepad(QStringLiteral("page-down")); break;
+        case BTN_MODE: m_controller->dispatchGamepad(QStringLiteral("exit-to-steam")); break;
         default: break;
         }
     }

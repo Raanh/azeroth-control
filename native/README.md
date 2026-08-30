@@ -29,6 +29,11 @@ The SteamOS wrapper keeps only Steam's 64-bit overlay renderer in `LD_PRELOAD`.
 Loading both architectures can stall Qt, while removing both prevents Guide/Home
 from opening a correctly focused Steam overlay for the non-Steam shortcut.
 
+SteamOS currently has an upstream focus bug when two non-Steam shortcuts run at
+the same time. In Gaming Mode, Guide/Home therefore exits only the Azeroth
+Control UI and returns to Steam; managed server containers continue running so
+the user can launch WoW normally.
+
 Build with Qt 6:
 
 ```sh
