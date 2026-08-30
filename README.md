@@ -307,6 +307,8 @@ data will never be distributed by this project.
   panel.
 - Server actions and editable configuration keys use allow-lists.
 - Installer work is checkpointed and resumable.
+- Removing the final registered realm returns the native app to first-time setup;
+  realm-dependent controls remain unavailable until setup completes.
 - Existing client and configuration files are backed up before supported
   changes.
 - Destructive server deletion is restricted to registered, app-managed server

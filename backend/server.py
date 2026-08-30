@@ -57,15 +57,34 @@ CONTROLLER_TEMPLATE_TYPES = (
 
 
 def addon_paths():
-    selection = json.loads((ROOT / "install-selection.json").read_text())
-    client = Path(selection["clientPath"]).expanduser().resolve()
+    selection_path = ROOT / "install-selection.json"
+    if not selection_path.is_file():
+        raise ValueError("Install or select a realm before managing client addons")
+    selection = json.loads(selection_path.read_text())
+    client_path = str(selection.get("clientPath", "")).strip()
+    if not client_path:
+        raise ValueError("The selected realm has no WoW client folder")
+    client = Path(client_path).expanduser().resolve()
     addons = client / "Interface" / "AddOns"
     records = client / "Interface" / ".azeroth-control-addons.json"
     return client, addons, records
 
 
 def addon_payload() -> dict:
-    client, addons, records_path = addon_paths()
+    try:
+        client, addons, records_path = addon_paths()
+    except (OSError, ValueError, json.JSONDecodeError):
+        entries = []
+        for addon in ADDON_CATALOG:
+            item = dict(addon)
+            item.update({"installed": False, "installedVersion": "", "repairAvailable": False})
+            if addon["id"] == "ffxiv-controller":
+                item.update({"steamTemplatesInstalled": 0, "steamTemplatesExpected": len(CONTROLLER_TEMPLATE_TYPES)})
+            entries.append(item)
+        return {
+            "configured": False, "clientPath": "", "addonsPath": "", "addons": entries,
+            "message": "Finish first-time realm setup before managing WoW addons.",
+        }
     try: records = json.loads(records_path.read_text())
     except (OSError, json.JSONDecodeError): records = {}
     entries = []
@@ -82,7 +101,7 @@ def addon_payload() -> dict:
             )
             item["steamTemplatesExpected"] = len(CONTROLLER_TEMPLATE_TYPES)
         entries.append(item)
-    return {"clientPath": str(client), "addonsPath": str(addons), "addons": entries}
+    return {"configured": True, "clientPath": str(client), "addonsPath": str(addons), "addons": entries}
 
 
 def install_controller_preset(client: Path, addons: Path, records: dict, records_path: Path) -> None:

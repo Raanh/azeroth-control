@@ -66,8 +66,13 @@ void Controller::reloadInstallations()
 
 void Controller::start()
 {
-    startBackend();
-    QTimer::singleShot(350, this, &Controller::refresh);
+    if (!m_installations.isEmpty()) {
+        startBackend();
+        QTimer::singleShot(350, this, &Controller::refresh);
+    } else {
+        m_availableRealms.clear();
+        emit statusChanged();
+    }
     m_refreshTimer.start();
 }
 
@@ -115,6 +120,8 @@ void Controller::startBackend()
 
 void Controller::refresh()
 {
+    if (m_installations.isEmpty())
+        return;
     request(QStringLiteral("/api/status"));
 }
 
@@ -354,7 +361,8 @@ void Controller::removeInstallation(const QString &id, bool deleteFiles)
     const QString path = QDir::cleanPath(target.value(QStringLiteral("path")).toString());
     const QString managedRoot = QDir::cleanPath(QDir::homePath() + QStringLiteral("/.local/share/azeroth-control/servers")) + '/';
     if (deleteFiles && (!path.startsWith(managedRoot) || path == managedRoot.chopped(1))) { setNotice(QStringLiteral("Refusing to delete outside the managed server folder.")); return; }
-    if (state.value(QStringLiteral("activeInstallationId")).toString() == id) {
+    const bool removedActive = state.value(QStringLiteral("activeInstallationId")).toString() == id;
+    if (removedActive) {
         const QString control = path + QStringLiteral("/bin/server-control");
         if (QFileInfo::exists(control))
             QProcess::execute(control, {QStringLiteral("stop")});
@@ -379,12 +387,33 @@ void Controller::removeInstallation(const QString &id, bool deleteFiles)
         if (result != 0) { setNotice(QStringLiteral("Could not move the managed server to Trash.")); return; }
     }
     state.insert(QStringLiteral("installations"), remaining);
-    if (state.value(QStringLiteral("activeInstallationId")).toString() == id)
+    state.insert(QStringLiteral("onboardingComplete"), !remaining.isEmpty());
+    if (removedActive)
         state.insert(QStringLiteral("activeInstallationId"), remaining.isEmpty() ? QString() : remaining.first().toObject().value(QStringLiteral("id")).toString());
     QFile file(statePath() + QStringLiteral(".tmp"));
     if (file.open(QIODevice::WriteOnly)) { file.write(QJsonDocument(state).toJson(QJsonDocument::Indented)); file.close(); QFile::remove(statePath()); QFile::rename(statePath() + QStringLiteral(".tmp"), statePath()); }
     reloadInstallations();
-    setNotice(deleteFiles ? QStringLiteral("Server data moved to Trash. Restart Azeroth Control to load another server.") : QStringLiteral("Server removed from Azeroth Control."));
+    if (remaining.isEmpty()) {
+        if (m_backend.state() != QProcess::NotRunning) {
+            m_backend.terminate();
+            if (!m_backend.waitForFinished(3000)) m_backend.kill();
+        }
+        m_serverState = QStringLiteral("offline");
+        m_realmName = QStringLiteral("No realm configured");
+        m_availableRealms.clear();
+        emit statusChanged();
+    } else if (removedActive) {
+        m_root = remaining.first().toObject().value(QStringLiteral("path")).toString();
+        if (m_backend.state() != QProcess::NotRunning) {
+            m_backend.terminate();
+            if (!m_backend.waitForFinished(3000)) m_backend.kill();
+        }
+        startBackend();
+        QTimer::singleShot(350, this, &Controller::refresh);
+    }
+    setNotice(remaining.isEmpty()
+        ? QStringLiteral("No realms remain. Complete first-time setup to create a new local server.")
+        : deleteFiles ? QStringLiteral("Server data moved to Trash.") : QStringLiteral("Server removed from Azeroth Control."));
 }
 
 void Controller::serverAction(const QString &action, const QString &realm)

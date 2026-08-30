@@ -55,6 +55,13 @@ ApplicationWindow {
         {"role":"DPS","classId":4,"specId":1}
     ]
 
+    function showFirstTimeSetup() {
+        if (control.installations.length !== 0)
+            return
+        root.page = "install"
+        Qt.callLater(function() { installProfile.forceActiveFocus() })
+    }
+
     function classesForRole(role) {
         var result = []
         for (var i = 0; i < partyClasses.length; ++i) {
@@ -377,7 +384,11 @@ ApplicationWindow {
             x: 26 * root.s; y: 577 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "✚   Addons"; font.pixelSize: 19 * root.s
             highlighted: root.page === "addons"
-            onClicked: { root.page = "addons"; control.apiGet("addons", "/api/addons") }
+            onClicked: {
+                root.page = "addons"
+                if (control.installations.length > 0)
+                    control.apiGet("addons", "/api/addons")
+            }
             KeyNavigation.up: worldButton; KeyNavigation.down: logsButton
         }
         AzButton {
@@ -494,7 +505,7 @@ ApplicationWindow {
             width: parent.width - 96 * root.s; height: parent.height - 190 * root.s
             radius: 18 * root.s; color: root.panel; border.color: root.edge
 
-            Text { x: 36 * root.s; y: 30 * root.s; text: root.page === "realms" ? "Realm Controls" : root.page === "bots" ? "Bot Population" : root.page === "queues" ? "Queues" : root.page === "party" ? "Party Builder" : root.page === "world" ? "World Settings" : root.page === "addons" ? "Addons" : root.page === "logs" ? "Logs" : "Updates & Backups"; color: root.ink; font.pixelSize: 31 * root.s; font.bold: true }
+            Text { x: 36 * root.s; y: 30 * root.s; text: root.page === "install" ? (control.installations.length === 0 ? "First-Time Setup" : "New Server Setup") : root.page === "realms" ? "Realm Controls" : root.page === "bots" ? "Bot Population" : root.page === "queues" ? "Queues" : root.page === "party" ? "Party Builder" : root.page === "world" ? "World Settings" : root.page === "addons" ? "Addons" : root.page === "logs" ? "Logs" : "Updates & Backups"; color: root.ink; font.pixelSize: 31 * root.s; font.bold: true }
 
             Item {
                 x: 36 * root.s; y: 92 * root.s; width: parent.width - 72 * root.s; height: parent.height - 122 * root.s
@@ -575,7 +586,8 @@ ApplicationWindow {
             Column {
                 x: 36 * root.s; y: 100 * root.s; width: parent.width - 72 * root.s; spacing: 18 * root.s
                 visible: root.page === "install"
-                Text { text: "Create a new local server"; color: root.ink; font.pixelSize: 24 * root.s }
+                Text { text: control.installations.length === 0 ? "Welcome — create your first local realm" : "Create a new local server"; color: root.ink; font.pixelSize: 24 * root.s }
+                Text { visible: control.installations.length === 0; width: 980 * root.s; text: "Choose a realm profile and point Azeroth Control to your own WoW 3.3.5a client. Server and addon controls unlock when setup finishes."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
                 Text { text: "Profile"; color: root.muted; font.pixelSize: 17 * root.s }
                 AzSelect {
                     id: installProfile
@@ -793,10 +805,19 @@ ApplicationWindow {
                 visible: root.page === "addons"
                 property var addonInfo: { var changed = control.data["/api/addons/action"]; return changed && changed.addons ? changed : (control.data["/api/addons"] || {}) }
                 Text { x: 0; y: 0; text: "WoW addon library"; color: root.ink; font.pixelSize: 24 * root.s; font.bold: true }
-                Text { x: 0; y: 38 * root.s; width: parent.width - 260 * root.s; text: addonInfo.clientPath ? "Client: " + addonInfo.clientPath : "Loading configured client…"; color: root.muted; font.pixelSize: 15 * root.s; elide: Text.ElideMiddle }
-                AzButton { anchors.right: parent.right; y: 0; text: "Open addon folder"; width: 220 * root.s; height: 54 * root.s; font.pixelSize: 16 * root.s; onClicked: control.apiPost("addons-folder", "/api/addons/action", {"action":"open-folder"}) }
+                Text { x: 0; y: 38 * root.s; width: parent.width - 260 * root.s; text: control.installations.length === 0 ? "A configured realm supplies the WoW client folder used by the addon library." : addonInfo.clientPath ? "Client: " + addonInfo.clientPath : "Loading configured client…"; color: root.muted; font.pixelSize: 15 * root.s; elide: Text.ElideMiddle }
+                AzButton { anchors.right: parent.right; y: 0; text: "Open addon folder"; width: 220 * root.s; height: 54 * root.s; font.pixelSize: 16 * root.s; enabled: control.installations.length > 0 && addonInfo.configured !== false; onClicked: control.apiPost("addons-folder", "/api/addons/action", {"action":"open-folder"}) }
+                Rectangle {
+                    visible: control.installations.length === 0
+                    x: 0; y: 92 * root.s; width: parent.width; height: 230 * root.s; radius: 12 * root.s; color: root.raised; border.color: root.edge
+                    Text { x: 24 * root.s; y: 24 * root.s; text: "NO REALM CONFIGURED"; color: root.gold; font.pixelSize: 14 * root.s; font.bold: true; font.letterSpacing: 1.3 }
+                    Text { x: 24 * root.s; y: 62 * root.s; text: "Complete first-time setup"; color: root.ink; font.pixelSize: 26 * root.s; font.bold: true }
+                    Text { x: 24 * root.s; y: 105 * root.s; width: parent.width - 48 * root.s; text: "After a realm is installed, Azeroth Control can find its WoW client and manage ConsolePortLK, Questie-X, RefinedBlizzPlates and the bundled addons."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
+                    AzButton { x: 24 * root.s; anchors.bottom: parent.bottom; anchors.bottomMargin: 20 * root.s; width: 250 * root.s; height: 56 * root.s; text: "Start first-time setup"; primary: true; font.pixelSize: 17 * root.s; onClicked: root.showFirstTimeSetup() }
+                }
                 ListView {
                     x: 0; y: 78 * root.s; width: parent.width; height: parent.height - 78 * root.s; spacing: 12 * root.s; clip: true
+                    visible: control.installations.length > 0
                     model: parent.addonInfo.addons || []
                     delegate: Rectangle {
                         id: addonCard
@@ -926,5 +947,24 @@ ApplicationWindow {
             }
         }
     }
-    Component.onCompleted: dashboardButton.forceActiveFocus()
+    Connections {
+        target: control
+        function onInstallationsChanged() {
+            if (control.installations.length === 0)
+                root.showFirstTimeSetup()
+        }
+        function onInstallChanged() {
+            if (!control.installRunning && control.installations.length > 0 && root.page === "install") {
+                root.page = "dashboard"
+                dashboardButton.forceActiveFocus()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (control.installations.length === 0)
+            root.showFirstTimeSetup()
+        else
+            dashboardButton.forceActiveFocus()
+    }
 }
