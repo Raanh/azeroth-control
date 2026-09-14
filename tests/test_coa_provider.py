@@ -91,6 +91,12 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('test -s /output/dbc/Spell.dbc', control)
         self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc'", control.replace('"', ''))
 
+    def test_existing_coa_server_has_a_client_data_migration_action(self):
+        controller = (REPOSITORY / "native/controller.cpp").read_text()
+        qml = (REPOSITORY / "native/qml/Main.qml").read_text()
+        self.assertIn("void Controller::applyCoaClientDataFix()", controller)
+        self.assertIn('text: "Apply CoA client-data fix"', qml)
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

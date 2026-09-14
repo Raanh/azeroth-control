@@ -2,6 +2,13 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.20] - 2026-09-14
+
+### Fixed
+
+- Add an explicit dashboard action for completed CoA installations to apply
+  the matching-client-DBC migration without creating another server.
+
 ## [0.4.0-preview.19] - 2026-09-14
 
 ### Fixed

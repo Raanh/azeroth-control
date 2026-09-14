@@ -373,6 +373,24 @@ void Controller::installServer(const QVariantMap &input)
     m_installProcess.start();
 }
 
+void Controller::applyCoaClientDataFix()
+{
+    if (m_installRunning)
+        return;
+    const QJsonObject saved = readJson(m_root + QStringLiteral("/install-selection.json"));
+    if (saved.value(QStringLiteral("provider")).toString() != QStringLiteral("azerothcore-coa")) {
+        setNotice(QStringLiteral("The active server is not a managed CoA installation."));
+        return;
+    }
+    QVariantMap selection = saved.toVariantMap();
+    selection.insert(QStringLiteral("serverId"), QFileInfo(m_root).fileName());
+    // Re-run the managed installer against this exact completed installation.
+    // It keeps checkpoints, databases and accounts, while .19+ supplies the
+    // CoA tools image and extracts the matching client DBCs.
+    selection.insert(QStringLiteral("installRoot"), QDir::cleanPath(QFileInfo(m_root).dir().absoluteFilePath(QStringLiteral(".."))));
+    installServer(selection);
+}
+
 void Controller::pauseInstallation()
 {
 #ifdef Q_OS_LINUX

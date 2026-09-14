@@ -68,7 +68,7 @@ public:
     bool autoBalanceEnabled() const { return m_autoBalanceEnabled; }
     QVariantMap data() const { return m_data; }
     QVariantList installations() const { return m_installations; }
-    QString version() const { return QStringLiteral("0.4.0-preview.16"); }
+    QString version() const { return QStringLiteral("0.4.0-preview.20"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});
@@ -78,6 +78,7 @@ public:
     Q_INVOKABLE void apiGet(const QString &key, const QString &path);
     Q_INVOKABLE void apiPost(const QString &key, const QString &path, const QVariantMap &payload = {});
     Q_INVOKABLE void installServer(const QVariantMap &selection);
+    Q_INVOKABLE void applyCoaClientDataFix();
     Q_INVOKABLE void pauseInstallation();
     Q_INVOKABLE void cancelInstallation();
     Q_INVOKABLE void removeInstallation(const QString &id, bool deleteFiles);

@@ -628,9 +628,10 @@ ApplicationWindow {
 
                     Row {
                         x: 24 * root.s; anchors.bottom: parent.bottom; anchors.bottomMargin: 24 * root.s; spacing: 12 * root.s
-                        AzButton { id: realmStart; text: "Start realm"; primary: control.serverState !== "online"; width: 180 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; enabled: !control.busy; onClicked: control.serverAction("start", control.activeRealm); KeyNavigation.right: realmRestart }
-                        AzButton { id: realmRestart; text: "Restart realm"; width: 190 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; enabled: !control.busy; onClicked: control.serverAction("restart", control.activeRealm); KeyNavigation.left: realmStart; KeyNavigation.right: realmStop }
-                        AzButton { id: realmStop; text: "Stop server"; danger: true; width: 180 * root.s; height: 58 * root.s; font.pixelSize: 17 * root.s; enabled: !control.busy; onClicked: control.serverAction("stop", control.activeRealm); KeyNavigation.left: realmRestart }
+                        AzButton { id: realmStart; text: "Start realm"; primary: control.serverState !== "online"; width: 160 * root.s; height: 58 * root.s; font.pixelSize: 16 * root.s; enabled: !control.busy; onClicked: control.serverAction("start", control.activeRealm); KeyNavigation.right: realmRestart }
+                        AzButton { id: realmRestart; text: "Restart realm"; width: 170 * root.s; height: 58 * root.s; font.pixelSize: 16 * root.s; enabled: !control.busy; onClicked: control.serverAction("restart", control.activeRealm); KeyNavigation.left: realmStart; KeyNavigation.right: coaClientDataFix }
+                        AzButton { id: coaClientDataFix; visible: control.providerId === "azerothcore-coa"; text: "Apply CoA client-data fix"; primary: true; width: 250 * root.s; height: 58 * root.s; font.pixelSize: 15 * root.s; enabled: !control.busy; onClicked: control.applyCoaClientDataFix(); KeyNavigation.left: realmRestart; KeyNavigation.right: realmStop }
+                        AzButton { id: realmStop; text: "Stop server"; danger: true; width: 160 * root.s; height: 58 * root.s; font.pixelSize: 16 * root.s; enabled: !control.busy; onClicked: control.serverAction("stop", control.activeRealm); KeyNavigation.left: control.providerId === "azerothcore-coa" ? coaClientDataFix : realmRestart }
                     }
                 }
 
