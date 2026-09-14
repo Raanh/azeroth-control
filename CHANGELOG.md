@@ -2,6 +2,13 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.24] - 2026-09-14
+
+### Fixed
+
+- Show live and completed Repair, Update, and Backup output in the Maintenance
+  page instead of hiding it in the short dashboard notification.
+
 ## [0.4.0-preview.23] - 2026-09-14
 
 ### Fixed

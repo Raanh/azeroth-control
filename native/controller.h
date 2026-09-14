@@ -26,6 +26,9 @@ class Controller final : public QObject
     Q_PROPERTY(bool installPaused READ installPaused NOTIFY installChanged)
     Q_PROPERTY(int installProgress READ installProgress NOTIFY installChanged)
     Q_PROPERTY(QString installMessage READ installMessage NOTIFY installChanged)
+    Q_PROPERTY(bool maintenanceRunning READ maintenanceRunning NOTIFY statusChanged)
+    Q_PROPERTY(QString maintenanceLabel READ maintenanceLabel NOTIFY statusChanged)
+    Q_PROPERTY(QString maintenanceLog READ maintenanceLog NOTIFY statusChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(QString activeRealm READ activeRealm NOTIFY statusChanged)
     Q_PROPERTY(QStringList availableRealms READ availableRealms NOTIFY statusChanged)
@@ -58,6 +61,9 @@ public:
     bool installPaused() const { return m_installPaused; }
     int installProgress() const { return m_installProgress; }
     QString installMessage() const { return m_installMessage; }
+    bool maintenanceRunning() const { return m_maintenanceRunning; }
+    QString maintenanceLabel() const { return m_maintenanceLabel; }
+    QString maintenanceLog() const { return m_maintenanceLog; }
     QString notice() const { return m_notice; }
     QString activeRealm() const { return m_activeRealm; }
     QStringList availableRealms() const { return m_availableRealms; }
@@ -68,7 +74,7 @@ public:
     bool autoBalanceEnabled() const { return m_autoBalanceEnabled; }
     QVariantMap data() const { return m_data; }
     QVariantList installations() const { return m_installations; }
-    QString version() const { return QStringLiteral("0.4.0-preview.23"); }
+    QString version() const { return QStringLiteral("0.4.0-preview.24"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});
@@ -140,5 +146,8 @@ private:
     int m_installProgress = 0;
     QString m_installMessage;
     QString m_installParseBuffer;
+    bool m_maintenanceRunning = false;
+    QString m_maintenanceLabel;
+    QString m_maintenanceLog;
     QVariantList m_installations;
 };

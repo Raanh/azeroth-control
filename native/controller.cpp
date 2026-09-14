@@ -562,9 +562,12 @@ void Controller::applyStatus(const QJsonObject &payload)
     if (m_availableRealms.isEmpty())
         m_availableRealms.append(m_activeRealm);
     const QJsonObject job = payload.value(QStringLiteral("job")).toObject();
-    setBusy(job.value(QStringLiteral("running")).toBool());
-    if (!job.value(QStringLiteral("message")).toString().isEmpty())
-        setNotice(job.value(QStringLiteral("message")).toString());
+    m_maintenanceRunning = job.value(QStringLiteral("running")).toBool();
+    m_maintenanceLabel = job.value(QStringLiteral("label")).toString();
+    m_maintenanceLog = job.value(QStringLiteral("message")).toString();
+    setBusy(m_maintenanceRunning);
+    if (!m_maintenanceLog.isEmpty())
+        setNotice(m_maintenanceLog);
     emit statusChanged();
 }
 

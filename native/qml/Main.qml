@@ -981,6 +981,26 @@ ApplicationWindow {
                 }
                 Text { text: "Updates create a recovery backup before changing the managed server."; color: root.muted; font.pixelSize: 18 * root.s; wrapMode: Text.Wrap }
                 Text { text: { var b = control.data["/api/backups"]; return b && b.backups ? "Backups available: " + b.backups.length : "Backups: loading…" } color: root.gold; font.pixelSize: 17 * root.s }
+                Rectangle {
+                    width: 1320 * root.s; height: 330 * root.s
+                    visible: control.maintenanceRunning || control.maintenanceLog.length > 0
+                    radius: 10 * root.s; color: "#0d171f"; border.color: root.edge
+                    Text {
+                        x: 18 * root.s; y: 14 * root.s
+                        text: control.maintenanceRunning
+                            ? (control.maintenanceLabel.length > 0 ? control.maintenanceLabel + "…" : "Maintenance in progress…")
+                            : (control.maintenanceLabel.length > 0 ? control.maintenanceLabel + " output" : "Last maintenance output")
+                        color: root.gold; font.pixelSize: 17 * root.s; font.bold: true
+                    }
+                    TextArea {
+                        x: 14 * root.s; y: 48 * root.s
+                        width: parent.width - 28 * root.s; height: parent.height - 62 * root.s
+                        readOnly: true; wrapMode: TextArea.Wrap
+                        text: control.maintenanceLog.length > 0 ? control.maintenanceLog : "Waiting for the repair script to report progress…"
+                        color: root.ink; font.pixelSize: 15 * root.s
+                        background: Rectangle { color: "transparent" }
+                    }
+                }
             }
         }
     }
