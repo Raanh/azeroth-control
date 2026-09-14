@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.15] - 2026-09-14
+
+### Fixed
+
+- Keep each managed MySQL database private to its Podman network, eliminating
+  the unnecessary host-port-3307 conflict during CoA installation and resume.
+- Refresh managed control scripts before an interrupted installation resumes.
+
 ## [0.4.0-preview.14] - 2026-09-14
 
 ### Fixed

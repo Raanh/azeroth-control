@@ -56,6 +56,13 @@ class CoAProviderTests(unittest.TestCase):
             installer = (REPOSITORY / "scripts/install-server.sh").read_text()
             self.assertIn("CLIENT_EXECUTABLE_NAMES=(Ascension.exe ascension.exe", installer)
 
+    def test_managed_database_has_no_host_port_binding(self):
+        control = (REPOSITORY / "scripts/server-control-managed").read_text()
+        installer = (REPOSITORY / "scripts/install-server.sh").read_text()
+        self.assertNotIn("-p 127.0.0.1:3307:3306", control)
+        self.assertNotIn("for port in 3307", installer)
+        self.assertIn("Checkpoint resumes must still receive fixes", installer)
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

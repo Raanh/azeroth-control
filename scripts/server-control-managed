@@ -81,7 +81,10 @@ start_server() {
     podman volume exists "$DATA_VOLUME" || podman volume create "$DATA_VOLUME" >/dev/null
     stop_server
 
-    podman run -d --name "$DB_CONTAINER" --restart=unless-stopped --network "$NETWORK" --network-alias "$DB_CONTAINER" -p 127.0.0.1:3307:3306 -e "MYSQL_ROOT_PASSWORD=$DB_PASSWORD" -v "$DB_VOLUME:/var/lib/mysql" docker.io/library/mysql:8.4 >/dev/null
+    # Database access is private to this installation's Podman network. The
+    # host does not need a published MySQL port; publishing 3307 made otherwise
+    # independent installations collide with each other and local databases.
+    podman run -d --name "$DB_CONTAINER" --restart=unless-stopped --network "$NETWORK" --network-alias "$DB_CONTAINER" -e "MYSQL_ROOT_PASSWORD=$DB_PASSWORD" -v "$DB_VOLUME:/var/lib/mysql" docker.io/library/mysql:8.4 >/dev/null
     for _ in $(seq 1 90); do
         podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 && break
         sleep 2

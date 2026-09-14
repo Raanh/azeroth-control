@@ -367,6 +367,16 @@ else
 fi
 touch "$CHECKPOINTS/configuration"
 
+# Checkpoint resumes must still receive fixes to the managed control scripts.
+# The configuration checkpoint is intentionally retained so no client config,
+# account input or already-built image work is discarded.
+cp "$SCRIPT_DIR/server-control-managed" "$SERVER_ROOT/bin/server-control"
+cp "$SCRIPT_DIR/coa-mysql-managed" "$SERVER_ROOT/bin/coa-mysql"
+cp "$SCRIPT_DIR/autologin-managed" "$SERVER_ROOT/bin/autologin"
+cp "$SCRIPT_DIR/update-server-managed" "$SERVER_ROOT/bin/update-server"
+cp "$SCRIPT_DIR/repair-server-managed" "$SERVER_ROOT/bin/repair-server"
+chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/coa-mysql" "$SERVER_ROOT/bin/autologin" "$SERVER_ROOT/bin/update-server" "$SERVER_ROOT/bin/repair-server"
+
 if [[ ! -f "$CHECKPOINTS/images" ]]; then
     if podman image exists "$SHARED_WORLD_IMAGE" && podman image exists "$SHARED_AUTH_IMAGE" \
         && podman image exists "$SHARED_IMPORT_IMAGE" && podman image exists "$SHARED_DATA_IMAGE"; then
@@ -393,7 +403,7 @@ fi
 
 if [[ ! -f "$CHECKPOINTS/health-check" ]]; then
     printf '[5/6] Creating databases, client data and running the health check…\n'
-    for port in 3307 3724 "$WORLD_PORT"; do
+    for port in 3724 "$WORLD_PORT"; do
         if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
             printf 'Port %s is already in use. Stop the other local server and press Resume.\n' "$port" >&2
             exit 3

@@ -1,6 +1,6 @@
 {
   "name": "azeroth-control",
-  "version": "0.4.0-preview.14",
+  "version": "0.4.0-preview.15",
   "description": "Gamepad-friendly Steam Deck and SteamOS control center for AzerothCore Playerbots and experimental CoA servers",
   "author": "Raanh and Azeroth Control contributors",
   "license": "MIT",
