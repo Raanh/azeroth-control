@@ -43,7 +43,7 @@
       "core": {
         "repository": "https://github.com/jealous-sound/azerothcore-wotlk-coa.git",
         "branch": "main",
-        "revision": "b5f3ae75ded0de00f1862620229ea4a1d5eeb3f6",
+        "revision": "126ee7d9212deedac11ae5fee3c6b8f6981cc89f",
         "license": "GPL-2.0",
         "freshInstallReady": true,
         "estimatedDownloadBytes": 7516192768,

@@ -2,6 +2,16 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.26] - 2026-09-14
+
+### Fixed
+
+- Match the exact CoA source revision used by the `ability-fixes-20260914`
+  forum repack, rather than building the older pinned revision.
+- Add an optional CoA Repack folder to the native installer. Its matching
+  server `Data/` tree and clean database snapshot are imported into the native
+  Linux containers; Windows executables are never run or copied.
+
 ## [0.4.0-preview.25] - 2026-09-14
 
 ### Fixed

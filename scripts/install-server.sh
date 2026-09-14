@@ -34,6 +34,7 @@ PY
 
 INSTALL_ROOT="$(json_value installRoot)"
 CLIENT_PATH="$(json_value clientPath)"
+COA_REPACK_PATH="$(json_optional coaRepackPath)"
 PROFILE="$(json_value profile)"
 BOT_COUNT="$(json_value bots)"
 SERVER_ID="$(json_optional serverId)"
@@ -115,6 +116,12 @@ fi
 if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$CLIENT_PATH/Extensions.dll" ]]; then
     printf 'The selected folder is not a supported CoA native-v4 client: Extensions.dll is missing.\n' >&2
     exit 2
+fi
+if [[ -n "$COA_REPACK_PATH" ]]; then
+    [[ "$PROVIDER_ID" == azerothcore-coa ]] || { printf 'A CoA Repack folder can only be used with the CoA provider.\n' >&2; exit 2; }
+    [[ -d "$COA_REPACK_PATH/Data" ]] || { printf 'The CoA Repack folder is missing Data: %s\n' "$COA_REPACK_PATH" >&2; exit 2; }
+    [[ -f "$COA_REPACK_PATH/Database/Clean/databases.sql.gz" ]] || { printf 'The CoA Repack folder is missing Database/Clean/databases.sql.gz.\n' >&2; exit 2; }
+    command -v gzip >/dev/null 2>&1 || { printf 'Required command is missing: gzip\n' >&2; exit 2; }
 fi
 for command in git podman python3; do
     command -v "$command" >/dev/null 2>&1 || { printf 'Required command is missing: %s\n' "$command" >&2; exit 2; }
@@ -287,6 +294,7 @@ SHARED_TOOLS_IMAGE="localhost/azeroth-control/wotlk-tools:engine-$ENGINE_FINGERP
     printf 'WORLD_PORT=%q\n' "$WORLD_PORT"
     printf 'BOT_COUNT=%q\n' "$BOT_COUNT"
     printf 'CLIENT_PATH=%q\n' "$CLIENT_PATH"
+    printf 'COA_REPACK_PATH=%q\n' "$COA_REPACK_PATH"
     printf 'CLIENT_EXECUTABLE=%q\n' "$CLIENT_EXECUTABLE"
     printf 'AUTO_LOGIN=%q\n' "${AUTO_LOGIN:-0}"
     printf 'CONTAINER_PREFIX=%q\n' "$CONTAINER_PREFIX"
@@ -427,7 +435,7 @@ if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
     # Existing CoA installations need the complete matching client DBC tree,
     # including Ascension's collection records. Force one managed restart when
     # that revised migration has not completed.
-    if [[ ! -f "$SERVER_ROOT/state/coa-client-dbc-v2-installed" ]]; then
+    if [[ ! -f "$SERVER_ROOT/state/coa-client-dbc-v3-installed" ]]; then
         rm -f "$CHECKPOINTS/health-check"
         "$SERVER_ROOT/bin/server-control" stop
     fi

@@ -182,7 +182,8 @@ void Controller::installServer(const QVariantMap &input)
             const QJsonObject previous = readJson(candidate.filePath() + QStringLiteral("/install-selection.json"));
             if (previous.value(QStringLiteral("profile")).toString() == selection.value(QStringLiteral("profile")).toString()
                 && previous.value(QStringLiteral("provider")).toString(QStringLiteral("azerothcore-playerbots")) == selection.value(QStringLiteral("provider")).toString()
-                && previous.value(QStringLiteral("clientPath")).toString() == selection.value(QStringLiteral("clientPath")).toString()) {
+                && previous.value(QStringLiteral("clientPath")).toString() == selection.value(QStringLiteral("clientPath")).toString()
+                && previous.value(QStringLiteral("coaRepackPath")).toString() == selection.value(QStringLiteral("coaRepackPath")).toString()) {
                 selection.insert(QStringLiteral("serverId"), candidate.fileName());
                 break;
             }

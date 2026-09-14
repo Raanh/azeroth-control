@@ -40,6 +40,11 @@ class CoAProviderTests(unittest.TestCase):
         self.assertRegex(autobalance["revision"], r"^[0-9a-f]{40}$")
         self.assertTrue(autobalance["default"])
 
+    def test_coa_matches_the_repack_source_revision(self):
+        catalog = json.loads((REPOSITORY / "manifests/catalog.json").read_text())
+        coa = next(item for item in catalog["providers"] if item["id"] == "azerothcore-coa")
+        self.assertEqual(coa["core"]["revision"], "126ee7d9212deedac11ae5fee3c6b8f6981cc89f")
+
     def test_coa_prefers_ascension_executable(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -86,7 +91,7 @@ class CoAProviderTests(unittest.TestCase):
         installer = (REPOSITORY / "scripts/install-server.sh").read_text()
         control = (REPOSITORY / "scripts/server-control-managed").read_text()
         self.assertIn('--target tools -t "$SHARED_TOOLS_IMAGE"', installer)
-        self.assertIn('coa-client-dbc-v2-installed', installer)
+        self.assertIn('coa-client-dbc-v3-installed', installer)
         self.assertIn('map_extractor -e 2 -i /client -o /output', control)
         self.assertIn('test -s /output/dbc/Spell.dbc', control)
         self.assertIn('Ascension/Appearances.dbc', control)
@@ -94,6 +99,16 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('continuing without collections', control)
         self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc/Ascension'", control.replace('"', ''))
         self.assertIn('local coa_client_dbc_ready=1', control)
+
+    def test_coa_can_import_the_matching_repack_data_and_database(self):
+        installer = (REPOSITORY / "scripts/install-server.sh").read_text()
+        control = (REPOSITORY / "scripts/server-control-managed").read_text()
+        self.assertIn('COA_REPACK_PATH="$(json_optional coaRepackPath)"', installer)
+        self.assertIn('Database/Clean/databases.sql.gz', installer)
+        self.assertIn('Installing matching CoA Repack server data', control)
+        self.assertIn('Importing matching CoA Repack database snapshot', control)
+        self.assertIn('coa-repack-data-v1-installed', control)
+        self.assertIn('coa-client-dbc-v3-installed', control)
 
     def test_existing_coa_server_has_a_client_data_migration_action(self):
         controller = (REPOSITORY / "native/controller.cpp").read_text()

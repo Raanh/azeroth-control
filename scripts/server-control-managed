@@ -7,6 +7,7 @@ PROVIDER_ID="${PROVIDER_ID:-azerothcore-playerbots}"
 SUPPORTS_BOTS="${SUPPORTS_BOTS:-1}"
 AUTOBALANCE_ENABLED="${AUTOBALANCE_ENABLED:-0}"
 TOOLS_IMAGE="${TOOLS_IMAGE:-}"
+COA_REPACK_PATH="${COA_REPACK_PATH:-}"
 RUNTIME="$ROOT/runtime"
 MODULES_DIR="$RUNTIME/modules"
 case "$REALM_KEY" in
@@ -29,9 +30,27 @@ remove_container() { podman rm -f "$1" >/dev/null 2>&1 || true; }
 
 install_coa_client_dbc() {
     [[ "$PROVIDER_ID" == azerothcore-coa ]] || return 0
+    if [[ -n "$COA_REPACK_PATH" ]]; then
+        [[ -d "$COA_REPACK_PATH/Data" ]] || { printf 'The configured CoA Repack Data directory is missing: %s\n' "$COA_REPACK_PATH/Data" >&2; return 1; }
+        [[ -f "$ROOT/state/coa-repack-data-v1-installed" ]] && return 0
+        printf 'Installing matching CoA Repack server data…\n'
+        podman run --rm --entrypoint /bin/bash \
+            -v "$DATA_VOLUME:/azerothcore/env/dist/data" -v "$COA_REPACK_PATH/Data:/input:ro" "$DATA_IMAGE" -lc '
+                set -Eeuo pipefail
+                test -s /input/dbc/Spell.dbc
+                test -s /input/dbc/Ascension/Appearances.dbc
+                test -s /input/dbc/Ascension/ItemAppearances.dbc
+                test -s /input/dbc/Ascension/VanityCollection.dbc
+                cp -Rf /input/. /azerothcore/env/dist/data/
+                test -s /azerothcore/env/dist/data/dbc/Spell.dbc
+            '
+        touch "$ROOT/state/coa-repack-data-v1-installed"
+        touch "$ROOT/state/coa-client-dbc-v3-installed"
+        return 0
+    fi
     [[ -n "$TOOLS_IMAGE" ]] || { printf 'CoA client-data extractor image is missing. Resume the installation with the current Azeroth Control release.\n' >&2; return 1; }
     [[ -d "$CLIENT_PATH/Data" ]] || { printf 'The configured CoA client Data directory is missing: %s\n' "$CLIENT_PATH/Data" >&2; return 1; }
-    [[ -f "$ROOT/state/coa-client-dbc-v2-installed" ]] && return 0
+    [[ -f "$ROOT/state/coa-client-dbc-v3-installed" ]] && return 0
 
     # The downloaded stock server data is enough for an ordinary WotLK realm,
     # but CoA needs the matching custom Spell.dbc and related files from the
@@ -70,7 +89,20 @@ install_coa_client_dbc() {
                 printf "Ascension collection DBCs remain unavailable; continuing without collections.\\n"
             fi
         '
-    touch "$ROOT/state/coa-client-dbc-v2-installed"
+    touch "$ROOT/state/coa-client-dbc-v3-installed"
+}
+
+install_coa_repack_database() {
+    [[ "$PROVIDER_ID" == azerothcore-coa && -n "$COA_REPACK_PATH" ]] || return 0
+    [[ -f "$ROOT/state/coa-repack-database-v1-installed" ]] && return 0
+    local snapshot="$COA_REPACK_PATH/Database/Clean/databases.sql.gz"
+    [[ -f "$snapshot" ]] || { printf 'The configured CoA Repack database snapshot is missing: %s\n' "$snapshot" >&2; return 1; }
+    printf 'Importing matching CoA Repack database snapshot…\n'
+    gzip -cd -- "$snapshot" | podman exec -i "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD"
+    podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "SELECT 1 FROM acore_auth.realmlist LIMIT 1" >/dev/null
+    podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "SELECT 1 FROM acore_world.version LIMIT 1" >/dev/null
+    touch "$ROOT/state/coa-repack-database-v1-installed"
+    touch "$ROOT/state/coa-world-bootstrap"
 }
 
 set_conf_value() {
@@ -99,7 +131,7 @@ stop_server() {
 
 start_server() {
     local coa_client_dbc_ready=1
-    if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$ROOT/state/coa-client-dbc-v2-installed" ]]; then
+    if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$ROOT/state/coa-client-dbc-v3-installed" ]]; then
         coa_client_dbc_ready=0
     fi
     if port_ready 3724 && port_ready "$WORLD_PORT" \
@@ -144,6 +176,7 @@ start_server() {
     podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 || { podman logs --tail 100 "$DB_CONTAINER" >&2; return 1; }
 
     if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+        install_coa_repack_database
         podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS acore_world CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         world_tables="$(podman exec "$DB_CONTAINER" mysql -N -uroot -p"$DB_PASSWORD" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='acore_world'" | tr -d '[:space:]')"
         if [[ "$world_tables" == 0 ]]; then

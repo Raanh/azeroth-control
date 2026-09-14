@@ -1,7 +1,7 @@
 name: Native AppImage
 
 env:
-  APP_VERSION: 0.4.0-preview.25
+  APP_VERSION: 0.4.0-preview.26
 
 on:
   workflow_dispatch:
@@ -93,4 +93,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "release/Azeroth-Control-${APP_VERSION}-x86_64.AppImage" \
             scripts/Azeroth-Control-SteamOS.sh \
-            --title "Azeroth Control 0.4.0 Preview 21" --generate-notes --prerelease
+            --title "Azeroth Control 0.4.0 Preview 26" --generate-notes --prerelease
