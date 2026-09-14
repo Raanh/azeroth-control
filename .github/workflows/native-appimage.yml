@@ -20,7 +20,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libx11-dev python3 qt6-base-dev qt6-declarative-dev xvfb xauth qml6-module-qtqml qml6-module-qtqml-models qml6-module-qtqml-workerscript qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-templates
+          sudo apt-get install -y build-essential libx11-dev python3 qt6-base-dev qt6-declarative-dev xvfb xauth qml6-module-qtqml qml6-module-qtqml-models qml6-module-qtqml-workerscript qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-shapes qml6-module-qtquick-templates qml6-module-qtquick-window
       - name: Validate provider contract
         run: |
           python3 -m unittest discover -s tests -v
@@ -50,7 +50,10 @@ jobs:
               --executable AppDir/usr/bin/azeroth-control-native \
               --desktop-file packaging/org.azerothcontrol.app.desktop \
               --icon-file public/favicon.svg --plugin qt --output appimage 2>&1 | tee linuxdeploy.log
-          if grep -q "ERROR: Missing qml module" linuxdeploy.log; then
+          MISSING_QML="$(grep "ERROR: Missing qml module" linuxdeploy.log \
+            | grep -Ev 'QtQuick\.Controls\.(Windows|macOS|iOS)( |$)' || true)"
+          if [[ -n "$MISSING_QML" ]]; then
+            printf '%s\n' "$MISSING_QML" >&2
             echo "linuxdeploy reported a missing QML runtime module" >&2
             exit 1
           fi
