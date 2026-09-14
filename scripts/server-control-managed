@@ -46,13 +46,14 @@ install_coa_client_dbc() {
             test -d /client/Data
             /azerothcore/env/dist/bin/map_extractor -e 2 -i /client -o /output
             test -s /output/dbc/Spell.dbc
-            if [[ ! -s /output/dbc/Ascension/Appearances.dbc ]]; then
+            if [[ -s /output/dbc/Ascension/Appearances.dbc && -s /output/dbc/Ascension/ItemAppearances.dbc && -s /output/dbc/Ascension/VanityCollection.dbc ]]; then
+                :
+            elif [[ -s /output/dbc/Appearances.dbc && -s /output/dbc/ItemAppearances.dbc && -s /output/dbc/VanityCollection.dbc ]]; then
                 mkdir -p /output/dbc/Ascension
                 cp -f /output/dbc/Appearances.dbc /output/dbc/ItemAppearances.dbc /output/dbc/VanityCollection.dbc /output/dbc/Ascension/
+            else
+                printf "Ascension collection DBCs are not present in this client; transmog and vanity collections will be disabled.\\n"
             fi
-            test -s /output/dbc/Ascension/Appearances.dbc
-            test -s /output/dbc/Ascension/ItemAppearances.dbc
-            test -s /output/dbc/Ascension/VanityCollection.dbc
         '
     # The stock client-data image creates its named volume without keep-id.
     # Make the staging tree readable by that same user namespace, then copy
@@ -65,9 +66,9 @@ install_coa_client_dbc() {
             mkdir -p /azerothcore/env/dist/data/dbc
             cp -Rf /input/dbc/. /azerothcore/env/dist/data/dbc/
             test -s /azerothcore/env/dist/data/dbc/Spell.dbc
-            test -s /azerothcore/env/dist/data/dbc/Ascension/Appearances.dbc
-            test -s /azerothcore/env/dist/data/dbc/Ascension/ItemAppearances.dbc
-            test -s /azerothcore/env/dist/data/dbc/Ascension/VanityCollection.dbc
+            if [[ ! -s /azerothcore/env/dist/data/dbc/Ascension/Appearances.dbc ]]; then
+                printf "Ascension collection DBCs remain unavailable; continuing without collections.\\n"
+            fi
         '
     touch "$ROOT/state/coa-client-dbc-v2-installed"
 }

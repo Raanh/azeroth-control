@@ -1,7 +1,7 @@
 name: Native AppImage
 
 env:
-  APP_VERSION: 0.4.0-preview.24
+  APP_VERSION: 0.4.0-preview.25
 
 on:
   workflow_dispatch:

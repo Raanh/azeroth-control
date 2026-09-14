@@ -91,6 +91,7 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('test -s /output/dbc/Spell.dbc', control)
         self.assertIn('Ascension/Appearances.dbc', control)
         self.assertIn('cp -Rf /input/dbc/. /azerothcore/env/dist/data/dbc/', control)
+        self.assertIn('continuing without collections', control)
         self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc/Ascension'", control.replace('"', ''))
         self.assertIn('local coa_client_dbc_ready=1', control)
 

@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.25] - 2026-09-14
+
+### Fixed
+
+- Let CoA servers start when an Ascension client lacks the optional collection
+  DBCs. Standard DBCs remain installed; only transmog/vanity collections are
+  disabled.
+
 ## [0.4.0-preview.24] - 2026-09-14
 
 ### Fixed
