@@ -68,6 +68,12 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('exec mysql "$@" -uroot -p"$MYSQL_ROOT_PASSWORD"', wrapper)
         self.assertNotIn('exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$@"', wrapper)
 
+    def test_coa_uses_its_verified_world_baseline_without_newer_world_updates(self):
+        control = (REPOSITORY / "scripts/server-control-managed").read_text()
+        self.assertIn('updates_enable_databases=3', control)
+        self.assertIn('-e "AC_UPDATES_ENABLE_DATABASES=$updates_enable_databases"', control)
+        self.assertIn('auth (1) and character (2) updates enabled, but leave world (4)', control)
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

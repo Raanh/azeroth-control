@@ -106,9 +106,21 @@ start_server() {
     elif [[ "$SUPPORTS_BOTS" == 1 ]]; then
         podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS $PLAYERBOTS_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     fi
+
+    # The CoA provider imports a verified, versioned world baseline before
+    # AzerothCore's db-import container runs. Its migration ledger already
+    # records the updates included by that baseline; applying the repository's
+    # newer pending world updates on top can mix incompatible schemas. Keep
+    # auth (1) and character (2) updates enabled, but leave world (4) to the
+    # CoA baseline until upstream publishes a matching refreshed baseline.
+    updates_enable_databases=7
+    if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+        updates_enable_databases=3
+    fi
     podman run --rm --name "${CONTAINER_PREFIX}-client-data-init" -v "$DATA_VOLUME:/azerothcore/env/dist/data" "$DATA_IMAGE"
     import_args=(--rm --name "${CONTAINER_PREFIX}-db-import" --userns=keep-id --network "$NETWORK"
         -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs
+        -e "AC_UPDATES_ENABLE_DATABASES=$updates_enable_databases"
         -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world"
         -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB"
         -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs")
@@ -159,7 +171,7 @@ start_server() {
     world_args=(-di --name "$WORLD_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK"
         -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878
         -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs
-        -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth"
+        -e "AC_UPDATES_ENABLE_DATABASES=$updates_enable_databases" -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth"
         -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB"
         -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc"
         -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro"

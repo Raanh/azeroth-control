@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.17] - 2026-09-14
+
+### Fixed
+
+- Keep CoA's verified world-content baseline authoritative and skip newer
+  upstream world migrations that are not schema-compatible with it. Auth and
+  character database updates remain enabled.
+
 ## [0.4.0-preview.16] - 2026-09-14
 
 ### Fixed
