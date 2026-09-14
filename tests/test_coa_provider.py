@@ -86,10 +86,12 @@ class CoAProviderTests(unittest.TestCase):
         installer = (REPOSITORY / "scripts/install-server.sh").read_text()
         control = (REPOSITORY / "scripts/server-control-managed").read_text()
         self.assertIn('--target tools -t "$SHARED_TOOLS_IMAGE"', installer)
-        self.assertIn('coa-client-dbc-installed', installer)
+        self.assertIn('coa-client-dbc-v2-installed', installer)
         self.assertIn('map_extractor -e 2 -i /client -o /output', control)
         self.assertIn('test -s /output/dbc/Spell.dbc', control)
-        self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc'", control.replace('"', ''))
+        self.assertIn('Ascension/Appearances.dbc', control)
+        self.assertIn('cp -Rf /input/dbc/. /azerothcore/env/dist/data/dbc/', control)
+        self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc/Ascension'", control.replace('"', ''))
         self.assertIn('local coa_client_dbc_ready=1', control)
 
     def test_existing_coa_server_has_a_client_data_migration_action(self):

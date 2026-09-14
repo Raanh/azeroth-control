@@ -424,9 +424,13 @@ if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
         podman build "${BUILD_ARGS[@]}" --target tools -t "$SHARED_TOOLS_IMAGE" "$CORE"
     fi
     podman tag "$SHARED_TOOLS_IMAGE" "$TOOLS_IMAGE"
-    # Existing CoA installations used stock downloaded DBCs. Force one
-    # managed restart so server-control can extract matching client DBCs.
-    [[ -f "$SERVER_ROOT/state/coa-client-dbc-installed" ]] || rm -f "$CHECKPOINTS/health-check"
+    # Existing CoA installations need the complete matching client DBC tree,
+    # including Ascension's collection records. Force one managed restart when
+    # that revised migration has not completed.
+    if [[ ! -f "$SERVER_ROOT/state/coa-client-dbc-v2-installed" ]]; then
+        rm -f "$CHECKPOINTS/health-check"
+        "$SERVER_ROOT/bin/server-control" stop
+    fi
 fi
 
 if [[ ! -f "$CHECKPOINTS/health-check" ]]; then

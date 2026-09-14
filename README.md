@@ -24,7 +24,7 @@ module authors.
 > being migrated from Electron/Chromium to Qt 6 Quick for much faster startup,
 > lower overhead, and more predictable SteamOS Gaming Mode behavior. It is
 > usable for testing, but unfinished flows and bugs are expected. The latest
-> native test build is [v0.4.0-preview.22](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.22);
+> native test build is [v0.4.0-preview.23](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.23);
 > the packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
 
 ## What the 0.4 native preview can do
@@ -194,7 +194,7 @@ You should have:
 
 1. Open the [Releases](https://github.com/raanh/azeroth-control/releases) page
    and download both:
-   - `Azeroth-Control-0.4.0-preview.22-x86_64.AppImage`
+   - `Azeroth-Control-0.4.0-preview.23-x86_64.AppImage`
    - `Azeroth-Control-SteamOS.sh`
 2. In Desktop Mode, create `~/Applications` and move both downloaded files into
    it.

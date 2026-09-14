@@ -31,7 +31,7 @@ install_coa_client_dbc() {
     [[ "$PROVIDER_ID" == azerothcore-coa ]] || return 0
     [[ -n "$TOOLS_IMAGE" ]] || { printf 'CoA client-data extractor image is missing. Resume the installation with the current Azeroth Control release.\n' >&2; return 1; }
     [[ -d "$CLIENT_PATH/Data" ]] || { printf 'The configured CoA client Data directory is missing: %s\n' "$CLIENT_PATH/Data" >&2; return 1; }
-    [[ -f "$ROOT/state/coa-client-dbc-installed" ]] && return 0
+    [[ -f "$ROOT/state/coa-client-dbc-v2-installed" ]] && return 0
 
     # The downloaded stock server data is enough for an ordinary WotLK realm,
     # but CoA needs the matching custom Spell.dbc and related files from the
@@ -46,6 +46,13 @@ install_coa_client_dbc() {
             test -d /client/Data
             /azerothcore/env/dist/bin/map_extractor -e 2 -i /client -o /output
             test -s /output/dbc/Spell.dbc
+            if [[ ! -s /output/dbc/Ascension/Appearances.dbc ]]; then
+                mkdir -p /output/dbc/Ascension
+                cp -f /output/dbc/Appearances.dbc /output/dbc/ItemAppearances.dbc /output/dbc/VanityCollection.dbc /output/dbc/Ascension/
+            fi
+            test -s /output/dbc/Ascension/Appearances.dbc
+            test -s /output/dbc/Ascension/ItemAppearances.dbc
+            test -s /output/dbc/Ascension/VanityCollection.dbc
         '
     # The stock client-data image creates its named volume without keep-id.
     # Make the staging tree readable by that same user namespace, then copy
@@ -56,10 +63,13 @@ install_coa_client_dbc() {
             set -Eeuo pipefail
             test -s /input/dbc/Spell.dbc
             mkdir -p /azerothcore/env/dist/data/dbc
-            cp -f /input/dbc/* /azerothcore/env/dist/data/dbc/
+            cp -Rf /input/dbc/. /azerothcore/env/dist/data/dbc/
             test -s /azerothcore/env/dist/data/dbc/Spell.dbc
+            test -s /azerothcore/env/dist/data/dbc/Ascension/Appearances.dbc
+            test -s /azerothcore/env/dist/data/dbc/Ascension/ItemAppearances.dbc
+            test -s /azerothcore/env/dist/data/dbc/Ascension/VanityCollection.dbc
         '
-    touch "$ROOT/state/coa-client-dbc-installed"
+    touch "$ROOT/state/coa-client-dbc-v2-installed"
 }
 
 set_conf_value() {
@@ -88,7 +98,7 @@ stop_server() {
 
 start_server() {
     local coa_client_dbc_ready=1
-    if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$ROOT/state/coa-client-dbc-installed" ]]; then
+    if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$ROOT/state/coa-client-dbc-v2-installed" ]]; then
         coa_client_dbc_ready=0
     fi
     if port_ready 3724 && port_ready "$WORLD_PORT" \
@@ -183,7 +193,7 @@ start_server() {
     if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
         ascension_config="$CONFIG_DIR/modules/mod_ascension_compat.conf"
         [[ -f "$ascension_config" ]] || { printf 'CoA compatibility configuration is missing.\n' >&2; return 1; }
-        set_conf_value "$ascension_config" AscensionCompat.DbcDirectory '"/azerothcore/env/dist/data/dbc"'
+        set_conf_value "$ascension_config" AscensionCompat.DbcDirectory '"/azerothcore/env/dist/data/dbc/Ascension"'
         if [[ "$AUTOBALANCE_ENABLED" == 1 ]]; then
             autobalance_config="$CONFIG_DIR/modules/AutoBalance.conf"
             [[ -f "$autobalance_config" ]] || { printf 'AutoBalance was selected but its configuration was not installed.\n' >&2; return 1; }

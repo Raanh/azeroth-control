@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.23] - 2026-09-14
+
+### Fixed
+
+- Install CoA's required `Ascension/` collection DBC tree, validate all three
+  files, and point the compatibility module at that directory. The migration
+  safely re-runs once for existing servers.
+
 ## [0.4.0-preview.22] - 2026-09-14
 
 ### Fixed
