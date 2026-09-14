@@ -3,6 +3,11 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/install.env"
+PROVIDER_ID="${PROVIDER_ID:-azerothcore-playerbots}"
+if [[ "$PROVIDER_ID" != azerothcore-playerbots ]]; then
+    printf 'Managed in-app source updates are not available for the experimental CoA provider. Install a newly validated CoA revision instead.\n' >&2
+    exit 2
+fi
 
 CORE="$ROOT/core"
 BRIDGE_SOURCE="$ROOT/state/bundled/mod-azeroth-control-bridge"

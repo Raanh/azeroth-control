@@ -42,6 +42,34 @@ ACCOUNT_NAME="$(json_optional accountName)"
 ACCOUNT_PASSWORD="$(json_optional accountPassword)"
 ADMIN_ACCOUNT="$(json_optional adminAccount)"
 AUTO_LOGIN="$(json_optional autoLogin)"
+PROVIDER_ID="$(json_optional provider)"
+PROVIDER_ID="${PROVIDER_ID:-azerothcore-playerbots}"
+mapfile -t PROVIDER_FIELDS < <(python3 - "$CATALOG_FILE" "$PROVIDER_ID" <<'PY'
+import json, sys
+catalog = json.load(open(sys.argv[1]))
+providers = catalog.get("providers") or [{
+    "id": catalog.get("core", {}).get("id", "azerothcore-playerbots"),
+    "core": catalog.get("core", {}), "profiles": catalog.get("profiles", []),
+    "modules": catalog.get("modules", []), "capabilities": {"bots": True},
+}]
+provider = next((item for item in providers if item.get("id") == sys.argv[2]), None)
+if provider is None:
+    raise SystemExit("Unknown installation provider: " + sys.argv[2])
+core = provider.get("core", {})
+print(core.get("repository", ""))
+print(core.get("branch", ""))
+print(core.get("revision", ""))
+print("1" if provider.get("capabilities", {}).get("bots") else "0")
+PY
+)
+CORE_REPOSITORY="${PROVIDER_FIELDS[0]:-}"
+CORE_BRANCH="${PROVIDER_FIELDS[1]:-}"
+CORE_REVISION="${PROVIDER_FIELDS[2]:-}"
+SUPPORTS_BOTS="${PROVIDER_FIELDS[3]:-0}"
+if [[ -z "$CORE_REPOSITORY" || -z "$CORE_BRANCH" ]]; then
+    printf 'Provider %s has an incomplete core definition.\n' "$PROVIDER_ID" >&2
+    exit 2
+fi
 SERVER_ID="${SERVER_ID:-default}"
 if [[ ! "$SERVER_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$ ]]; then
     printf 'Invalid server identifier: %s\n' "$SERVER_ID" >&2
@@ -64,14 +92,16 @@ if [[ ! -d "$CLIENT_PATH" || ! -f "$CLIENT_PATH/Wow.exe" ]]; then
     printf 'The selected folder does not contain Wow.exe.\n' >&2
     exit 2
 fi
+if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$CLIENT_PATH/Extensions.dll" ]]; then
+    printf 'The selected folder is not a supported CoA native-v4 client: Extensions.dll is missing.\n' >&2
+    exit 2
+fi
 for command in git podman python3; do
     command -v "$command" >/dev/null 2>&1 || { printf 'Required command is missing: %s\n' "$command" >&2; exit 2; }
 done
 for bundled_file in \
-    "$PARTY_BRIDGE_SOURCE/VERSION" \
-    "$PARTY_BRIDGE_SOURCE/src/mod_azeroth_control_bridge.cpp" \
-    "$PARTY_BRIDGE_SOURCE/src/AzerothControlBridge.cpp" \
     "$SCRIPT_DIR/server-control-managed" \
+    "$SCRIPT_DIR/coa-mysql-managed" \
     "$SCRIPT_DIR/autologin-managed" \
     "$SCRIPT_DIR/update-server-managed" \
     "$SCRIPT_DIR/repair-server-managed"; do
@@ -80,6 +110,17 @@ for bundled_file in \
         exit 2
     }
 done
+if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+    for bundled_file in \
+        "$PARTY_BRIDGE_SOURCE/VERSION" \
+        "$PARTY_BRIDGE_SOURCE/src/mod_azeroth_control_bridge.cpp" \
+        "$PARTY_BRIDGE_SOURCE/src/AzerothControlBridge.cpp"; do
+        [[ -f "$bundled_file" ]] || {
+            printf 'Azeroth Control installation bundle is incomplete: missing %s\n' "$bundled_file" >&2
+            exit 2
+        }
+    done
+fi
 
 mkdir -p "$INSTALL_ROOT"/{servers,cache,backups,logs,state}
 SERVER_ROOT="$INSTALL_ROOT/servers/$SERVER_ID"
@@ -91,8 +132,11 @@ if [[ "$(realpath "$CONFIG_FILE")" != "$(realpath -m "$SERVER_ROOT/install-selec
 fi
 
 if [[ ! -f "$CHECKPOINTS/core-source" ]]; then
-    printf '[1/6] Downloading AzerothCore Playerbots source…\n'
-    git clone --filter=blob:none --single-branch --branch Playerbot https://github.com/mod-playerbots/azerothcore-wotlk.git "$CORE"
+    printf '[1/6] Downloading %s source…\n' "$PROVIDER_ID"
+    git clone --filter=blob:none --single-branch --branch "$CORE_BRANCH" "$CORE_REPOSITORY" "$CORE"
+    if [[ -n "$CORE_REVISION" ]]; then
+        git -C "$CORE" checkout --detach "$CORE_REVISION"
+    fi
     touch "$CHECKPOINTS/core-source"
 else
     printf '[1/6] Core source already present; resuming.\n'
@@ -100,43 +144,56 @@ fi
 
 if [[ ! -f "$CHECKPOINTS/modules" ]]; then
     printf '[2/6] Downloading selected open-source modules…\n'
-    while IFS=$'\t' read -r module_id repository directory; do
+    while IFS='|' read -r module_id repository branch revision directory; do
         [[ -n "$repository" ]] || continue
         target="$CORE/modules/$directory"
-        [[ -d "$target/.git" ]] || git clone --filter=blob:none --depth 1 "$repository" "$target"
+        if [[ ! -d "$target/.git" ]]; then
+            clone_args=(--filter=blob:none)
+            [[ -n "$branch" ]] && clone_args+=(--single-branch --branch "$branch")
+            [[ -z "$revision" ]] && clone_args+=(--depth 1)
+            git clone "${clone_args[@]}" "$repository" "$target"
+            [[ -n "$revision" ]] && git -C "$target" checkout --detach "$revision"
+        fi
     done < <(python3 - "$CONFIG_FILE" "$CATALOG_FILE" <<'PY'
 import json, sys
 selection = json.load(open(sys.argv[1]))
 catalog = json.load(open(sys.argv[2]))
-enabled = set(selection["modules"])
-for module in catalog["modules"]:
+provider_id = selection.get("provider", catalog.get("defaultProvider", "azerothcore-playerbots"))
+providers = catalog.get("providers") or [{"id": catalog.get("core", {}).get("id", "azerothcore-playerbots"), "modules": catalog.get("modules", [])}]
+provider = next((item for item in providers if item.get("id") == provider_id), None)
+if provider is None:
+    raise SystemExit("Unknown installation provider: " + provider_id)
+enabled = set(selection.get("modules", []))
+enabled.update(module["id"] for module in provider.get("modules", []) if module.get("required"))
+for module in provider.get("modules", []):
     if module["id"] in enabled and module.get("repository") and module["id"] != "playerbots":
         directory = module["repository"].rsplit("/", 1)[-1].removesuffix(".git")
-        print(module["id"] + "\t" + module["repository"] + "\t" + directory)
+        print("|".join((module["id"], module["repository"], module.get("branch", ""), module.get("revision", ""), directory)))
 PY
 )
-    [[ -d "$CORE/modules/mod-playerbots/.git" ]] || git clone --filter=blob:none --depth 1 https://github.com/mod-playerbots/mod-playerbots.git "$CORE/modules/mod-playerbots"
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        [[ -d "$CORE/modules/mod-playerbots/.git" ]] || git clone --filter=blob:none --depth 1 https://github.com/mod-playerbots/mod-playerbots.git "$CORE/modules/mod-playerbots"
+    fi
     touch "$CHECKPOINTS/modules"
 else
     printf '[2/6] Modules already present; resuming.\n'
 fi
 
-# Party Builder is backed by a small, local-only world-console command module.
-# It is part of Azeroth Control itself (not a downloadable third-party module),
-# so every managed server gets the same safe bridge implementation.
-PARTY_BRIDGE_TARGET="$CORE/modules/mod-azeroth-control-bridge"
-PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$PARTY_BRIDGE_SOURCE/VERSION")"
-INSTALLED_PARTY_BRIDGE_VERSION=""
-if [[ -f "$SERVER_ROOT/state/party-bridge-version" ]]; then
-    INSTALLED_PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$SERVER_ROOT/state/party-bridge-version")"
-fi
-if [[ "$INSTALLED_PARTY_BRIDGE_VERSION" != "$PARTY_BRIDGE_VERSION" ]]; then
-    mkdir -p "$PARTY_BRIDGE_TARGET"
-    cp -a "$PARTY_BRIDGE_SOURCE/." "$PARTY_BRIDGE_TARGET/"
-    # A resumed installation with an older compiled image must rebuild the
-    # worldserver once so the updated bridge is actually linked.
-    if [[ -f "$CHECKPOINTS/images" ]]; then
-        rm "$CHECKPOINTS/images"
+# Party Builder only applies to the Playerbots provider.
+PARTY_BRIDGE_VERSION=none
+if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+    PARTY_BRIDGE_TARGET="$CORE/modules/mod-azeroth-control-bridge"
+    PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$PARTY_BRIDGE_SOURCE/VERSION")"
+    INSTALLED_PARTY_BRIDGE_VERSION=""
+    if [[ -f "$SERVER_ROOT/state/party-bridge-version" ]]; then
+        INSTALLED_PARTY_BRIDGE_VERSION="$(tr -d '[:space:]' < "$SERVER_ROOT/state/party-bridge-version")"
+    fi
+    if [[ "$INSTALLED_PARTY_BRIDGE_VERSION" != "$PARTY_BRIDGE_VERSION" ]]; then
+        mkdir -p "$PARTY_BRIDGE_TARGET"
+        cp -a "$PARTY_BRIDGE_SOURCE/." "$PARTY_BRIDGE_TARGET/"
+        if [[ -f "$CHECKPOINTS/images" ]]; then
+            rm "$CHECKPOINTS/images"
+        fi
     fi
 fi
 
@@ -151,7 +208,16 @@ sed -i \
     -e 's/^USER \$DOCKER_USER$/USER '"$HOST_UID:$HOST_GID"'/g' \
     "$DOCKERFILE"
 
-printf '[3/6] Preparing %s realm configuration for %s bots…\n' "$PROFILE" "$BOT_COUNT"
+AUTOBALANCE_ENABLED="$(python3 - "$CONFIG_FILE" <<'PY'
+import json, sys
+selection = json.load(open(sys.argv[1]))
+print("1" if "autobalance" in selection.get("modules", []) else "0")
+PY
+)"
+if [[ "$SUPPORTS_BOTS" != 1 ]]; then
+    BOT_COUNT=0
+fi
+printf '[3/6] Preparing %s realm configuration…\n' "$PROFILE"
 mkdir -p "$SERVER_ROOT/runtime/etc" "$SERVER_ROOT/runtime/logs" "$SERVER_ROOT/state" "$SERVER_ROOT/bin"
 INSTALL_ID="$(printf '%s' "$SERVER_ROOT" | sha256sum | cut -c1-10)"
 CONTAINER_PREFIX="azc-$INSTALL_ID"
@@ -164,11 +230,29 @@ case "$PROFILE" in
     progression) REALM_KEY=progression; REALM_NAME="Azeroth Progression"; START_LEVEL=1; WORLD_PORT=8085 ;;
     endgame) REALM_KEY=endgame; REALM_NAME="Azeroth Endgame 80"; START_LEVEL=80; WORLD_PORT=8086 ;;
     custom) REALM_KEY=qa; REALM_NAME="Azeroth Custom"; START_LEVEL=1; WORLD_PORT=8087 ;;
+    coa) REALM_KEY=coa; REALM_NAME="Conquest of Azeroth"; START_LEVEL=1; WORLD_PORT=8085 ;;
     *) printf 'Unsupported profile: %s\n' "$PROFILE" >&2; exit 2 ;;
 esac
+if [[ "$PROVIDER_ID" == azerothcore-coa && "$PROFILE" != coa ]] || [[ "$PROVIDER_ID" != azerothcore-coa && "$PROFILE" == coa ]]; then
+    printf 'Profile %s does not belong to provider %s.\n' "$PROFILE" "$PROVIDER_ID" >&2
+    exit 2
+fi
 REALM_NAME="${SERVER_NAME:-$REALM_NAME}"
 CLIENT_EXECUTABLE="$CLIENT_PATH/Wow.exe"
 [[ -f "$CLIENT_PATH/Wow-HD.exe" ]] && CLIENT_EXECUTABLE="$CLIENT_PATH/Wow-HD.exe"
+COA_DBC_DIR=""
+if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+    while IFS= read -r -d '' appearance_dbc; do
+        candidate_dir="$(dirname "$appearance_dbc")"
+        if [[ -f "$candidate_dir/ItemAppearances.dbc" && -f "$candidate_dir/VanityCollection.dbc" ]]; then
+            COA_DBC_DIR="$candidate_dir"
+            break
+        fi
+    done < <(find "$CLIENT_PATH" -maxdepth 6 -type f -name Appearances.dbc -print0 2>/dev/null)
+    if [[ -z "$COA_DBC_DIR" ]]; then
+        printf 'Note: custom collection DBCs were not found as loose files. Gameplay can start, but the CoA appearance collection may be incomplete.\n'
+    fi
+fi
 WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:$IMAGE_TAG"
 AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:$IMAGE_TAG"
 IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:$IMAGE_TAG"
@@ -179,13 +263,17 @@ ENGINE_FINGERPRINT="$({
         printf '%s=' "$(basename "$module")"
         if [[ -d "$module/.git" ]]; then git -C "$module" rev-parse HEAD; else find "$module" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum; fi
     done
-    printf 'bridge=%s\nuid=%s\ngid=%s\n' "$PARTY_BRIDGE_VERSION" "$HOST_UID" "$HOST_GID"
+    printf 'provider=%s\nbridge=%s\nuid=%s\ngid=%s\n' "$PROVIDER_ID" "$PARTY_BRIDGE_VERSION" "$HOST_UID" "$HOST_GID"
 } | sha256sum | cut -c1-20)"
 SHARED_WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:engine-$ENGINE_FINGERPRINT"
 SHARED_AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:engine-$ENGINE_FINGERPRINT"
 SHARED_IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:engine-$ENGINE_FINGERPRINT"
 SHARED_DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:engine-$ENGINE_FINGERPRINT"
 {
+    printf 'PROVIDER_ID=%q\n' "$PROVIDER_ID"
+    printf 'SUPPORTS_BOTS=%q\n' "$SUPPORTS_BOTS"
+    printf 'AUTOBALANCE_ENABLED=%q\n' "$AUTOBALANCE_ENABLED"
+    printf 'COA_DBC_DIR=%q\n' "$COA_DBC_DIR"
     printf 'PROFILE=%q\n' "$PROFILE"
     printf 'REALM_KEY=%q\n' "$REALM_KEY"
     printf 'REALM_NAME=%q\n' "$REALM_NAME"
@@ -206,12 +294,15 @@ SHARED_DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:engine-$ENGINE_FI
 } > "$SERVER_ROOT/install.env"
 printf '%s\n' "$CONTAINER_PREFIX" > "$SERVER_ROOT/state/container-prefix"
 cp "$SCRIPT_DIR/server-control-managed" "$SERVER_ROOT/bin/server-control"
+cp "$SCRIPT_DIR/coa-mysql-managed" "$SERVER_ROOT/bin/coa-mysql"
 cp "$SCRIPT_DIR/autologin-managed" "$SERVER_ROOT/bin/autologin"
 cp "$SCRIPT_DIR/update-server-managed" "$SERVER_ROOT/bin/update-server"
 cp "$SCRIPT_DIR/repair-server-managed" "$SERVER_ROOT/bin/repair-server"
-mkdir -p "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge"
-cp -a "$PARTY_BRIDGE_SOURCE/." "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge/"
-chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/autologin" "$SERVER_ROOT/bin/update-server" "$SERVER_ROOT/bin/repair-server"
+if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+    mkdir -p "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge"
+    cp -a "$PARTY_BRIDGE_SOURCE/." "$SERVER_ROOT/state/bundled/mod-azeroth-control-bridge/"
+fi
+chmod +x "$SERVER_ROOT/bin/server-control" "$SERVER_ROOT/bin/coa-mysql" "$SERVER_ROOT/bin/autologin" "$SERVER_ROOT/bin/update-server" "$SERVER_ROOT/bin/repair-server"
 mkdir -p "$CLIENT_PATH/WTF"
 CLIENT_CONFIG="$CLIENT_PATH/WTF/Config.wtf"
 if [[ -f "$CLIENT_CONFIG" && ! -f "$CLIENT_CONFIG.azeroth-control-backup" ]]; then
@@ -229,6 +320,18 @@ if [[ -n "$ACCOUNT_NAME" ]]; then
     else
         printf 'SET accountName "%s"\n' "${ACCOUNT_NAME^^}" >> "$CLIENT_CONFIG"
     fi
+fi
+if [[ "$PROVIDER_ID" == azerothcore-coa && -d "$CLIENT_PATH/Data" ]]; then
+    while IFS= read -r -d '' realm_config; do
+        if [[ ! -f "$realm_config.azeroth-control-backup" ]]; then
+            cp -a "$realm_config" "$realm_config.azeroth-control-backup"
+        fi
+        if grep -qi '^set realmlist ' "$realm_config"; then
+            sed -i 's/^set realmlist .*/set realmlist 127.0.0.1/I' "$realm_config"
+        else
+            printf 'set realmlist 127.0.0.1\n' >> "$realm_config"
+        fi
+    done < <(find "$CLIENT_PATH/Data" -mindepth 2 -maxdepth 2 -type f -iname realmlist.wtf -print0)
 fi
 AUTOLOGIN_FILE="$SERVER_ROOT/state/autologin.json"
 if [[ "$AUTO_LOGIN" == 1 || "$AUTO_LOGIN" == true ]]; then
@@ -263,7 +366,9 @@ if [[ ! -f "$CHECKPOINTS/images" ]]; then
     podman tag "$SHARED_IMPORT_IMAGE" "$IMPORT_IMAGE"
     podman tag "$SHARED_DATA_IMAGE" "$DATA_IMAGE"
     touch "$CHECKPOINTS/images"
-    printf '%s\n' "$PARTY_BRIDGE_VERSION" > "$SERVER_ROOT/state/party-bridge-version"
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        printf '%s\n' "$PARTY_BRIDGE_VERSION" > "$SERVER_ROOT/state/party-bridge-version"
+    fi
 else
     printf '[4/6] Container images already exist; resuming.\n'
 fi

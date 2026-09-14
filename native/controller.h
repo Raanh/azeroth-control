@@ -16,6 +16,10 @@ class Controller final : public QObject
     Q_PROPERTY(QString cpu READ cpu NOTIFY statusChanged)
     Q_PROPERTY(QString memory READ memory NOTIFY statusChanged)
     Q_PROPERTY(int bots READ bots NOTIFY statusChanged)
+    Q_PROPERTY(QString providerId READ providerId NOTIFY statusChanged)
+    Q_PROPERTY(bool supportsBots READ supportsBots NOTIFY statusChanged)
+    Q_PROPERTY(bool supportsAutoBalance READ supportsAutoBalance NOTIFY statusChanged)
+    Q_PROPERTY(bool supportsManagedUpdates READ supportsManagedUpdates NOTIFY statusChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool gameRunning READ gameRunning NOTIFY gameRunningChanged)
     Q_PROPERTY(bool installRunning READ installRunning NOTIFY installChanged)
@@ -29,6 +33,7 @@ class Controller final : public QObject
     Q_PROPERTY(double xpRate READ xpRate NOTIFY settingsChanged)
     Q_PROPERTY(double dropRate READ dropRate NOTIFY settingsChanged)
     Q_PROPERTY(double spawnRate READ spawnRate NOTIFY settingsChanged)
+    Q_PROPERTY(bool autoBalanceEnabled READ autoBalanceEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap data READ data NOTIFY dataChanged)
     Q_PROPERTY(QVariantList installations READ installations NOTIFY installationsChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -43,6 +48,10 @@ public:
     QString cpu() const { return m_cpu; }
     QString memory() const { return m_memory; }
     int bots() const { return m_bots; }
+    QString providerId() const { return m_providerId; }
+    bool supportsBots() const { return m_supportsBots; }
+    bool supportsAutoBalance() const { return m_supportsAutoBalance; }
+    bool supportsManagedUpdates() const { return m_supportsManagedUpdates; }
     bool busy() const { return m_busy; }
     bool gameRunning() const { return m_gameRunning; }
     bool installRunning() const { return m_installRunning; }
@@ -56,9 +65,10 @@ public:
     double xpRate() const { return m_xpRate; }
     double dropRate() const { return m_dropRate; }
     double spawnRate() const { return m_spawnRate; }
+    bool autoBalanceEnabled() const { return m_autoBalanceEnabled; }
     QVariantMap data() const { return m_data; }
     QVariantList installations() const { return m_installations; }
-    QString version() const { return QStringLiteral("0.4.0-preview.11"); }
+    QString version() const { return QStringLiteral("0.4.0-preview.12"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});
@@ -109,10 +119,15 @@ private:
     QString m_activeRealm = QStringLiteral("progression");
     QStringList m_availableRealms{QStringLiteral("progression")};
     int m_bots = 0;
+    QString m_providerId = QStringLiteral("azerothcore-playerbots");
+    bool m_supportsBots = true;
+    bool m_supportsAutoBalance = false;
+    bool m_supportsManagedUpdates = true;
     int m_configuredBots = 0;
     double m_xpRate = 1.0;
     double m_dropRate = 1.0;
     double m_spawnRate = 1.0;
+    bool m_autoBalanceEnabled = false;
     QVariantMap m_data;
     bool m_busy = false;
     bool m_gameRunning = false;

@@ -3,12 +3,18 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/install.env"
+PROVIDER_ID="${PROVIDER_ID:-azerothcore-playerbots}"
+SUPPORTS_BOTS="${SUPPORTS_BOTS:-1}"
+AUTOBALANCE_ENABLED="${AUTOBALANCE_ENABLED:-0}"
+COA_DBC_DIR="${COA_DBC_DIR:-}"
 RUNTIME="$ROOT/runtime"
 MODULES_DIR="$RUNTIME/modules"
 case "$REALM_KEY" in
     progression) CONFIG_DIR="$RUNTIME/etc"; LOG_DIR="$RUNTIME/logs" ;;
     endgame) CONFIG_DIR="$RUNTIME/endgame/etc"; LOG_DIR="$RUNTIME/endgame/logs" ;;
     qa) CONFIG_DIR="$RUNTIME/qa/etc"; LOG_DIR="$RUNTIME/qa/logs" ;;
+    coa) CONFIG_DIR="$RUNTIME/etc"; LOG_DIR="$RUNTIME/logs" ;;
+    *) printf 'Unsupported managed realm: %s\n' "$REALM_KEY" >&2; exit 2 ;;
 esac
 NETWORK="${CONTAINER_PREFIX}-network"
 DB_VOLUME="${CONTAINER_PREFIX}-database-data"
@@ -20,6 +26,22 @@ DB_INFO="$DB_CONTAINER;3306;root;$DB_PASSWORD"
 
 port_ready() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 remove_container() { podman rm -f "$1" >/dev/null 2>&1 || true; }
+
+set_conf_value() {
+    local path="$1" key="$2" value="$3"
+    python3 - "$path" "$key" "$value" <<'PY'
+from pathlib import Path
+import re, sys
+path, key, value = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text()
+pattern = re.compile(r"^(\s*" + re.escape(key) + r"\s*=\s*).*$", re.MULTILINE)
+if not pattern.search(text):
+    raise SystemExit("Missing configuration key: " + key)
+temporary = path.with_suffix(path.suffix + ".tmp")
+temporary.write_text(pattern.sub(lambda match: match.group(1) + value, text, count=1))
+temporary.replace(path)
+PY
+}
 
 stop_server() {
     podman stop -t 60 "$WORLD_CONTAINER" "$AUTH_CONTAINER" >/dev/null 2>&1 || true
@@ -50,7 +72,10 @@ start_server() {
         printf '%s is running but temporarily busy; leaving it untouched.\n' "$REALM_NAME"
         return 0
     fi
-    mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$MODULES_DIR/mod-playerbots/data/sql"
+    mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$MODULES_DIR"
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        mkdir -p "$MODULES_DIR/mod-playerbots/data/sql"
+    fi
     podman network exists "$NETWORK" || podman network create "$NETWORK" >/dev/null
     podman volume exists "$DB_VOLUME" || podman volume create "$DB_VOLUME" >/dev/null
     podman volume exists "$DATA_VOLUME" || podman volume create "$DATA_VOLUME" >/dev/null
@@ -63,10 +88,34 @@ start_server() {
     done
     podman exec "$DB_CONTAINER" mysqladmin ping -uroot -p"$DB_PASSWORD" --silent >/dev/null 2>&1 || { podman logs --tail 100 "$DB_CONTAINER" >&2; return 1; }
 
-    podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS $PLAYERBOTS_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+        podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS acore_world CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        world_tables="$(podman exec "$DB_CONTAINER" mysql -N -uroot -p"$DB_PASSWORD" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='acore_world'" | tr -d '[:space:]')"
+        if [[ "$world_tables" == 0 ]]; then
+            printf 'Importing the verified CoA world-content baseline…\n'
+            python3 "$ROOT/core/apps/coa-world/world_data.py" verify
+            python3 "$ROOT/core/apps/coa-world/world_data.py" bootstrap --mysql "$ROOT/bin/coa-mysql" --database acore_world
+            touch "$ROOT/state/coa-world-bootstrap"
+        elif [[ ! -f "$ROOT/state/coa-world-bootstrap" ]]; then
+            printf 'The CoA world database is non-empty but has no managed bootstrap marker. Refusing to overwrite it.\n' >&2
+            return 1
+        fi
+    elif [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS $PLAYERBOTS_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    fi
     podman run --rm --name "${CONTAINER_PREFIX}-client-data-init" -v "$DATA_VOLUME:/azerothcore/env/dist/data" "$DATA_IMAGE"
-    podman run --rm --name "${CONTAINER_PREFIX}-db-import" --userns=keep-id --network "$NETWORK" -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$IMPORT_IMAGE"
-    podman run --rm --userns=keep-id --entrypoint /bin/bash -v "$MODULES_DIR:/export" "$IMPORT_IMAGE" -lc 'mkdir -p /export/mod-playerbots/data/sql && cp -a /azerothcore/modules/mod-playerbots/data/sql/. /export/mod-playerbots/data/sql/'
+    import_args=(--rm --name "${CONTAINER_PREFIX}-db-import" --userns=keep-id --network "$NETWORK"
+        -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs
+        -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world"
+        -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB"
+        -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs")
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        import_args+=(-e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1)
+    fi
+    podman run "${import_args[@]}" "$IMPORT_IMAGE"
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        podman run --rm --userns=keep-id --entrypoint /bin/bash -v "$MODULES_DIR:/export" "$IMPORT_IMAGE" -lc 'mkdir -p /export/mod-playerbots/data/sql && cp -a /azerothcore/modules/mod-playerbots/data/sql/. /export/mod-playerbots/data/sql/'
+    fi
 
     if [[ -d "$CONFIG_DIR/modules" ]]; then
         while IFS= read -r -d '' source_config; do
@@ -74,10 +123,55 @@ start_server() {
             [[ -e "$target_config" ]] || cp "$source_config" "$target_config"
         done < <(find "$CONFIG_DIR/modules" -maxdepth 1 -type f -name '*.conf.dist' -print0)
     fi
+    if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+        ascension_config="$CONFIG_DIR/modules/mod_ascension_compat.conf"
+        [[ -f "$ascension_config" ]] || { printf 'CoA compatibility configuration is missing.\n' >&2; return 1; }
+        if [[ -n "$COA_DBC_DIR" ]]; then
+            set_conf_value "$ascension_config" AscensionCompat.DbcDirectory '"/azerothcore/env/dist/data/dbc/Ascension"'
+        fi
+        if [[ "$AUTOBALANCE_ENABLED" == 1 ]]; then
+            autobalance_config="$CONFIG_DIR/modules/AutoBalance.conf"
+            [[ -f "$autobalance_config" ]] || { printf 'AutoBalance was selected but its configuration was not installed.\n' >&2; return 1; }
+            if [[ ! -f "$ROOT/state/autobalance-configured" ]]; then
+                set_conf_value "$autobalance_config" AutoBalance.Enable.Global 1
+                set_conf_value "$autobalance_config" AutoBalance.MinPlayers 1
+                set_conf_value "$autobalance_config" AutoBalance.MinPlayers.Heroic 1
+                set_conf_value "$autobalance_config" AutoBalance.MinPlayers.Raid 1
+                set_conf_value "$autobalance_config" AutoBalance.MinPlayers.RaidHeroic 1
+                touch "$ROOT/state/autobalance-configured"
+            fi
+            autobalance_state="$(sed -n 's/^[[:space:]]*AutoBalance.Enable.Global[[:space:]]*=[[:space:]]*//p' "$autobalance_config" | tail -n 1 | tr -d '[:space:]')"
+            # Avoid stacking two independent creature-scaling systems. Turning
+            # AutoBalance off in the UI restores CoA's original level scaler.
+            if [[ "$autobalance_state" == 1 ]]; then
+                set_conf_value "$ascension_config" AscensionCompat.LevelScaling 0
+            else
+                set_conf_value "$ascension_config" AscensionCompat.LevelScaling 1
+            fi
+        fi
+    fi
     podman exec "$DB_CONTAINER" mysql -uroot -p"$DB_PASSWORD" acore_auth -e "INSERT INTO realmlist (id,name,address,localAddress,localSubnetMask,port,icon,flag,timezone,allowedSecurityLevel,population,gamebuild) VALUES (1,'$REALM_NAME','127.0.0.1','127.0.0.1','255.255.255.0',$WORLD_PORT,0,0,1,0,0,12340) ON DUPLICATE KEY UPDATE name=VALUES(name),port=VALUES(port),flag=0,gamebuild=12340"
 
     podman run -d --name "$AUTH_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK" -p 127.0.0.1:3724:3724 -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" "$AUTH_IMAGE" >/dev/null
-    podman run -di --name "$WORLD_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK" -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878 -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth" -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB" -e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN=1 -e "AC_AI_PLAYERBOT_MIN_RANDOM_BOTS=$BOT_COUNT" -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1 -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc" -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro" -v "$MODULES_DIR:/azerothcore/modules:ro" "$WORLD_IMAGE" >/dev/null
+    world_args=(-di --name "$WORLD_CONTAINER" --restart=unless-stopped --userns=keep-id --network "$NETWORK"
+        -p "127.0.0.1:$WORLD_PORT:8085" -p 127.0.0.1:7878:7878
+        -e AC_DISABLE_INTERACTIVE=0 -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs
+        -e AC_UPDATES_ENABLE_DATABASES=7 -e "AC_LOGIN_DATABASE_INFO=$DB_INFO;acore_auth"
+        -e "AC_WORLD_DATABASE_INFO=$DB_INFO;acore_world" -e "AC_CHARACTER_DATABASE_INFO=$DB_INFO;$CHARACTER_DB"
+        -e "AC_START_PLAYER_LEVEL=$START_LEVEL" -v "$CONFIG_DIR:/azerothcore/env/dist/etc"
+        -v "$LOG_DIR:/azerothcore/env/dist/logs" -v "$DATA_VOLUME:/azerothcore/env/dist/data:ro"
+        -v "$MODULES_DIR:/azerothcore/modules:ro")
+    if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+        world_args+=(-e "AC_PLAYERBOTS_DATABASE_INFO=$DB_INFO;$PLAYERBOTS_DB" -e AC_PLAYERBOTS_UPDATES_ENABLE_DATABASES=1
+            -e AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN=1 -e "AC_AI_PLAYERBOT_MIN_RANDOM_BOTS=$BOT_COUNT"
+            -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50
+            -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1
+            -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1)
+    fi
+    if [[ "$PROVIDER_ID" == azerothcore-coa && -n "$COA_DBC_DIR" ]]; then
+        world_args+=(-v "$COA_DBC_DIR:/azerothcore/env/dist/data/dbc/Ascension:ro")
+    fi
+    podman run "${world_args[@]}" "$WORLD_IMAGE" >/dev/null
 
     local stable_checks=0
     local world_status

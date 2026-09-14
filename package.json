@@ -1,7 +1,7 @@
 {
   "name": "azeroth-control",
-  "version": "0.4.0-preview.11",
-  "description": "Gamepad-friendly Steam Deck and SteamOS installer and control center for AzerothCore Playerbots",
+  "version": "0.4.0-preview.12",
+  "description": "Gamepad-friendly Steam Deck and SteamOS control center for AzerothCore Playerbots and experimental CoA servers",
   "author": "Raanh and Azeroth Control contributors",
   "license": "MIT",
   "homepage": "https://github.com/raanh/azeroth-control",
@@ -96,6 +96,10 @@
         "to": "scripts/server-control-managed"
       },
       {
+        "from": "scripts/coa-mysql-managed",
+        "to": "scripts/coa-mysql-managed"
+      },
+      {
         "from": "scripts/launch-wow-managed",
         "to": "scripts/launch-wow-managed"
       },
@@ -126,7 +130,7 @@
       ],
       "category": "Game",
       "syncDesktopName": true,
-      "synopsis": "SteamOS control center for AzerothCore Playerbots"
+      "synopsis": "SteamOS control center for local AzerothCore servers"
     }
   }
 }

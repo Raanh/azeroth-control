@@ -165,8 +165,11 @@ void Controller::installServer(const QVariantMap &input)
     if (m_installRunning)
         return;
     QVariantMap selection = input;
+    if (!selection.contains(QStringLiteral("provider")))
+        selection.insert(QStringLiteral("provider"), QStringLiteral("azerothcore-playerbots"));
+    const bool isCoa = selection.value(QStringLiteral("provider")).toString() == QStringLiteral("azerothcore-coa");
     if (!selection.contains(QStringLiteral("profile")))
-        selection.insert(QStringLiteral("profile"), QStringLiteral("progression"));
+        selection.insert(QStringLiteral("profile"), isCoa ? QStringLiteral("coa") : QStringLiteral("progression"));
     if (!selection.contains(QStringLiteral("installRoot")))
         selection.insert(QStringLiteral("installRoot"), QDir::homePath() + QStringLiteral("/.local/share/azeroth-control"));
     if (!selection.contains(QStringLiteral("serverId"))) {
@@ -177,6 +180,7 @@ void Controller::installServer(const QVariantMap &input)
                 continue;
             const QJsonObject previous = readJson(candidate.filePath() + QStringLiteral("/install-selection.json"));
             if (previous.value(QStringLiteral("profile")).toString() == selection.value(QStringLiteral("profile")).toString()
+                && previous.value(QStringLiteral("provider")).toString(QStringLiteral("azerothcore-playerbots")) == selection.value(QStringLiteral("provider")).toString()
                 && previous.value(QStringLiteral("clientPath")).toString() == selection.value(QStringLiteral("clientPath")).toString()) {
                 selection.insert(QStringLiteral("serverId"), candidate.fileName());
                 break;
@@ -186,11 +190,13 @@ void Controller::installServer(const QVariantMap &input)
             selection.insert(QStringLiteral("serverId"), QStringLiteral("native-%1").arg(QDateTime::currentDateTimeUtc().toString("yyyyMMddhhmmss")));
     }
     if (!selection.contains(QStringLiteral("serverName")))
-        selection.insert(QStringLiteral("serverName"), QStringLiteral("Azeroth Progression"));
+        selection.insert(QStringLiteral("serverName"), isCoa ? QStringLiteral("Conquest of Azeroth") : QStringLiteral("Azeroth Progression"));
     if (!selection.contains(QStringLiteral("bots")))
-        selection.insert(QStringLiteral("bots"), 500);
+        selection.insert(QStringLiteral("bots"), isCoa ? 0 : 500);
     if (!selection.contains(QStringLiteral("modules")))
-        selection.insert(QStringLiteral("modules"), QVariantList{QStringLiteral("playerbots"), QStringLiteral("dungeon-clear"), QStringLiteral("aoe-loot"), QStringLiteral("transmog"), QStringLiteral("learn-spells"), QStringLiteral("auction-house"), QStringLiteral("multibot-bridge")});
+        selection.insert(QStringLiteral("modules"), isCoa
+            ? QVariantList{QStringLiteral("ascension-compat"), QStringLiteral("autobalance")}
+            : QVariantList{QStringLiteral("playerbots"), QStringLiteral("dungeon-clear"), QStringLiteral("aoe-loot"), QStringLiteral("transmog"), QStringLiteral("learn-spells"), QStringLiteral("auction-house"), QStringLiteral("multibot-bridge")});
 
     QString installer = qEnvironmentVariable("AZEROTH_CONTROL_INSTALLER");
     if (installer.isEmpty())
@@ -306,7 +312,7 @@ void Controller::installServer(const QVariantMap &input)
                 }
                 updated.append(QJsonObject{{QStringLiteral("id"), id},
                     {QStringLiteral("name"), selection.value(QStringLiteral("serverName")).toString(QStringLiteral("Azeroth Server"))},
-                    {QStringLiteral("path"), serverRoot}, {QStringLiteral("provider"), QStringLiteral("azerothcore-playerbots")},
+                    {QStringLiteral("path"), serverRoot}, {QStringLiteral("provider"), selection.value(QStringLiteral("provider")).toString(QStringLiteral("azerothcore-playerbots"))},
                     {QStringLiteral("imported"), false}, {QStringLiteral("createdAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
                 state.insert(QStringLiteral("installations"), updated);
                 state.insert(QStringLiteral("activeInstallationId"), id);
@@ -482,6 +488,7 @@ void Controller::request(const QString &path, const QByteArray &method, const QJ
             m_xpRate = settings.value(QStringLiteral("xpRate")).toDouble(m_xpRate);
             m_dropRate = settings.value(QStringLiteral("dropRate")).toDouble(m_dropRate);
             m_spawnRate = settings.value(QStringLiteral("spawnRate")).toDouble(m_spawnRate);
+            m_autoBalanceEnabled = settings.value(QStringLiteral("autoBalance")).toBool(m_autoBalanceEnabled);
             m_data.insert(path, data.toVariantMap());
             emit settingsChanged();
             emit dataChanged();
@@ -506,7 +513,12 @@ void Controller::applyStatus(const QJsonObject &payload)
     m_cpu = payload.value(QStringLiteral("cpu")).toString(QStringLiteral("—"));
     m_memory = payload.value(QStringLiteral("memory")).toString(QStringLiteral("—"));
     m_bots = payload.value(QStringLiteral("bots")).toInt();
-    m_activeRealm = payload.value(QStringLiteral("realm")).toString(QStringLiteral("progression"));
+    m_providerId = payload.value(QStringLiteral("provider")).toString(QStringLiteral("azerothcore-playerbots"));
+    const QJsonObject capabilities = payload.value(QStringLiteral("capabilities")).toObject();
+    m_supportsBots = capabilities.value(QStringLiteral("bots")).toBool(true);
+    m_supportsAutoBalance = capabilities.value(QStringLiteral("autoBalance")).toBool(false);
+    m_supportsManagedUpdates = capabilities.value(QStringLiteral("managedUpdates")).toBool(true);
+    m_activeRealm = payload.value(QStringLiteral("realm")).toString(m_providerId == QStringLiteral("azerothcore-coa") ? QStringLiteral("coa") : QStringLiteral("progression"));
     m_availableRealms.clear();
     for (const QJsonValue &realm : payload.value(QStringLiteral("availableRealms")).toArray())
         m_availableRealms.append(realm.toString());

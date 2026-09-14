@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/install.env"
+
+# CoA's verified world-data importer expects a local mysql executable. Keep
+# credentials out of its arguments and stream SQL into the managed DB container.
+exec podman exec -i "${CONTAINER_PREFIX}-database" \
+    sh -lc 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$@"' sh "$@"

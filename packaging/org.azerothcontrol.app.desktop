@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Azeroth Control
+Comment=SteamOS control center for local AzerothCore servers
+Exec=azeroth-control-native
+Icon=org.azerothcontrol.app
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=false

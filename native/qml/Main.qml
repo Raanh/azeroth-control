@@ -20,11 +20,19 @@ ApplicationWindow {
     property string installClientPath: "/home/deck/Games/AzerothCore-WotLK-HD"
     property string firstAccount: ""
     property string firstPassword: ""
+    property string installProviderId: "azerothcore-playerbots"
+    property bool installAutoBalance: true
+    property bool worldAutoBalance: control.autoBalanceEnabled
+    property var installProviders: [
+        {"id":"azerothcore-playerbots", "name":"AzerothCore Playerbots"},
+        {"id":"azerothcore-coa", "name":"Conquest of Azeroth · Experimental"}
+    ]
     property var installProfiles: [
         {"id":"progression", "name":"Progressive Level 1–80"},
         {"id":"endgame", "name":"Instant Level 80"},
         {"id":"custom", "name":"Custom Realm"}
     ]
+    property var coaProfiles: [{"id":"coa", "name":"Conquest of Azeroth"}]
     property bool queueLfg: true
     property bool queueBg: true
     property bool autoQueueBg: false
@@ -60,6 +68,8 @@ ApplicationWindow {
     onPageChanged: {
         if (control.installations.length === 0 && page !== "install")
             page = "install"
+        if (!control.supportsBots && (page === "bots" || page === "queues" || page === "party"))
+            page = "dashboard"
     }
 
     function showFirstTimeSetup() {
@@ -420,29 +430,31 @@ ApplicationWindow {
             text: "◇   Realms"; font.pixelSize: 19 * root.s
             highlighted: root.page === "realms" || root.page === "install"
             onClicked: { root.page = "realms"; control.reloadInstallations() }
-            KeyNavigation.up: dashboardButton; KeyNavigation.down: botsButton
+            KeyNavigation.up: dashboardButton; KeyNavigation.down: control.supportsBots ? botsButton : worldButton
         }
         AzButton {
             id: botsButton
             x: 26 * root.s; y: 289 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "♟   Bots"; font.pixelSize: 19 * root.s
             highlighted: root.page === "bots"
+            visible: control.supportsBots
             onClicked: root.page = "bots"
             KeyNavigation.up: realmsButton; KeyNavigation.down: queuesButton
         }
         AzButton {
             id: worldButton
-            x: 26 * root.s; y: 505 * root.s; width: 260 * root.s; height: 62 * root.s
+            x: 26 * root.s; y: (control.supportsBots ? 505 : 289) * root.s; width: 260 * root.s; height: 62 * root.s
             text: "◎   World Settings"; font.pixelSize: 19 * root.s
             highlighted: root.page === "world"
             onClicked: { root.page = "world"; control.loadSettings(control.activeRealm) }
-            KeyNavigation.up: partyButton; KeyNavigation.down: addonsButton
+            KeyNavigation.up: control.supportsBots ? partyButton : realmsButton; KeyNavigation.down: addonsButton
         }
         AzButton {
             id: queuesButton
             x: 26 * root.s; y: 361 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "⇄   Queues"; font.pixelSize: 19 * root.s
             highlighted: root.page === "queues"
+            visible: control.supportsBots
             onClicked: { root.page = "queues"; control.loadSettings(control.activeRealm) }
             KeyNavigation.up: botsButton; KeyNavigation.down: partyButton
         }
@@ -451,12 +463,13 @@ ApplicationWindow {
             x: 26 * root.s; y: 433 * root.s; width: 260 * root.s; height: 62 * root.s
             text: "♜   Party Builder"; font.pixelSize: 19 * root.s
             highlighted: root.page === "party"
+            visible: control.supportsBots
             onClicked: { root.page = "party"; control.apiGet("party", "/api/party") }
             KeyNavigation.up: queuesButton; KeyNavigation.down: worldButton
         }
         AzButton {
             id: addonsButton
-            x: 26 * root.s; y: 577 * root.s; width: 260 * root.s; height: 62 * root.s
+            x: 26 * root.s; y: (control.supportsBots ? 577 : 361) * root.s; width: 260 * root.s; height: 62 * root.s
             text: "✚   Addons"; font.pixelSize: 19 * root.s
             highlighted: root.page === "addons"
             onClicked: {
@@ -470,7 +483,7 @@ ApplicationWindow {
         }
         AzButton {
             id: logsButton
-            x: 26 * root.s; y: 649 * root.s; width: 260 * root.s; height: 62 * root.s
+            x: 26 * root.s; y: (control.supportsBots ? 649 : 433) * root.s; width: 260 * root.s; height: 62 * root.s
             text: "≡   Logs"; font.pixelSize: 19 * root.s
             highlighted: root.page === "logs"
             onClicked: { root.page = "logs"; control.apiGet("logs", "/api/logs?lines=220") }
@@ -478,7 +491,7 @@ ApplicationWindow {
         }
         AzButton {
             id: maintenanceButton
-            x: 26 * root.s; y: 721 * root.s; width: 260 * root.s; height: 62 * root.s
+            x: 26 * root.s; y: (control.supportsBots ? 721 : 505) * root.s; width: 260 * root.s; height: 62 * root.s
             text: "▣   Updates & Backups"; font.pixelSize: 19 * root.s
             highlighted: root.page === "maintenance"
             onClicked: { root.page = "maintenance"; control.apiGet("backups", "/api/backups") }
@@ -521,7 +534,7 @@ ApplicationWindow {
 
             Repeater {
                 model: [
-                    {"label":"BOTS ONLINE", "value":String(control.bots)},
+                    {"label":control.supportsBots ? "BOTS ONLINE" : "PLAY MODE", "value":control.supportsBots ? String(control.bots) : "SOLO"},
                     {"label":"CPU", "value":String(control.cpu)},
                     {"label":"MEMORY", "value":String(control.memory)},
                     {"label":"ACTIVE REALM", "value":String(control.activeRealm)}
@@ -553,8 +566,8 @@ ApplicationWindow {
                 radius: 12 * root.s; color: "#0d171f"; border.color: root.edge
                 Text { x: 24 * root.s; y: 20 * root.s; text: "QUICK CONTROLS"; color: root.muted; font.pixelSize: 14 * root.s; font.letterSpacing: 1.5 }
                 Text { x: 24 * root.s; y: 52 * root.s; text: "Prepare your next session"; color: root.ink; font.pixelSize: 23 * root.s; font.bold: true }
-                AzButton { id: dashboardPartyButton; x: 24 * root.s; y: 103 * root.s; width: parent.width - 48 * root.s; height: 54 * root.s; text: "♜  Build & Summon Party"; primary: true; font.pixelSize: 17 * root.s; onClicked: { root.page = "party"; control.apiGet("party", "/api/party") } KeyNavigation.left: refreshButton; KeyNavigation.down: dashboardQueueButton }
-                AzButton { id: dashboardQueueButton; x: 24 * root.s; y: 169 * root.s; width: (parent.width - 62 * root.s) / 2; height: 44 * root.s; text: "⇄  Queues"; font.pixelSize: 16 * root.s; onClicked: { root.page = "queues"; control.loadSettings(control.activeRealm) } KeyNavigation.up: dashboardPartyButton; KeyNavigation.right: dashboardWorldButton }
+                AzButton { id: dashboardPartyButton; x: 24 * root.s; y: 103 * root.s; width: parent.width - 48 * root.s; height: 54 * root.s; text: control.supportsBots ? "♜  Build & Summon Party" : "◎  Solo AutoBalance"; primary: true; font.pixelSize: 17 * root.s; onClicked: { root.page = control.supportsBots ? "party" : "world"; if (control.supportsBots) control.apiGet("party", "/api/party"); else control.loadSettings(control.activeRealm) } KeyNavigation.left: refreshButton; KeyNavigation.down: dashboardQueueButton }
+                AzButton { id: dashboardQueueButton; x: 24 * root.s; y: 169 * root.s; width: (parent.width - 62 * root.s) / 2; height: 44 * root.s; text: control.supportsBots ? "⇄  Queues" : "Experimental CoA"; font.pixelSize: 16 * root.s; enabled: control.supportsBots; onClicked: { root.page = "queues"; control.loadSettings(control.activeRealm) } KeyNavigation.up: dashboardPartyButton; KeyNavigation.right: dashboardWorldButton }
                 AzButton { id: dashboardWorldButton; anchors.right: parent.right; anchors.rightMargin: 24 * root.s; y: 169 * root.s; width: (parent.width - 62 * root.s) / 2; height: 44 * root.s; text: "◎  World settings"; font.pixelSize: 16 * root.s; onClicked: { root.page = "world"; control.loadSettings(control.activeRealm) } KeyNavigation.left: dashboardQueueButton; KeyNavigation.up: dashboardPartyButton }
             }
 
@@ -601,7 +614,7 @@ ApplicationWindow {
                         radius: 10 * root.s; color: root.raised; border.color: root.edge
                         Text { x: 18 * root.s; y: 18 * root.s; text: "PROFILE"; color: root.muted; font.pixelSize: 13 * root.s }
                         Text { x: 18 * root.s; y: 48 * root.s; text: control.activeRealm; color: root.ink; font.pixelSize: 23 * root.s; font.bold: true }
-                        Text { anchors.right: parent.right; anchors.rightMargin: 18 * root.s; y: 48 * root.s; text: control.bots + " bots online"; color: root.gold; font.pixelSize: 18 * root.s }
+                        Text { anchors.right: parent.right; anchors.rightMargin: 18 * root.s; y: 48 * root.s; text: control.supportsBots ? control.bots + " bots online" : "solo · AutoBalance"; color: root.gold; font.pixelSize: 18 * root.s }
                     }
 
                     Text { x: 24 * root.s; y: 292 * root.s; text: "AVAILABLE PROFILES"; color: root.muted; font.pixelSize: 14 * root.s; font.letterSpacing: 1.3 }
@@ -661,15 +674,22 @@ ApplicationWindow {
             }
 
             Column {
-                x: 36 * root.s; y: 100 * root.s; width: parent.width - 72 * root.s; spacing: 18 * root.s
+                x: 36 * root.s; y: 100 * root.s; width: parent.width - 72 * root.s; spacing: 10 * root.s
                 visible: root.page === "install"
                 Text { text: control.installations.length === 0 ? "Welcome — create your first local realm" : "Create a new local server"; color: root.ink; font.pixelSize: 24 * root.s }
                 Text { visible: control.installations.length === 0; width: 980 * root.s; text: "Choose a realm profile and point Azeroth Control to your own WoW 3.3.5a client. Server and addon controls unlock when setup finishes."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
+                Text { text: "Server type"; color: root.muted; font.pixelSize: 17 * root.s }
+                AzSelect {
+                    id: installProvider
+                    width: 520 * root.s; height: 58 * root.s
+                    choices: root.installProviders; selectedIndex: 0; font.pixelSize: 18 * root.s
+                    onSelectionAccepted: function(index) { selectedIndex = index; root.installProviderId = root.installProviders[index].id; installProfile.selectedIndex = 0 }
+                }
                 Text { text: "Profile"; color: root.muted; font.pixelSize: 17 * root.s }
                 AzSelect {
                     id: installProfile
                     width: 430 * root.s; height: 58 * root.s
-                    choices: root.installProfiles; selectedIndex: 0; font.pixelSize: 18 * root.s
+                    choices: root.installProviderId === "azerothcore-coa" ? root.coaProfiles : root.installProfiles; selectedIndex: 0; font.pixelSize: 18 * root.s
                     onSelectionAccepted: function(index) { selectedIndex = index }
                 }
                 Text { text: "WoW 3.3.5a client folder"; color: root.muted; font.pixelSize: 17 * root.s }
@@ -678,11 +698,13 @@ ApplicationWindow {
                     TextField { id: accountField; width: 260 * root.s; height: 54 * root.s; placeholderText: "First account (optional)"; text: root.firstAccount; font.pixelSize: 16 * root.s; onTextChanged: root.firstAccount = text }
                     TextField { id: passwordField; width: 260 * root.s; height: 54 * root.s; placeholderText: "Password"; echoMode: TextInput.Password; text: root.firstPassword; font.pixelSize: 16 * root.s; onTextChanged: root.firstPassword = text }
                 }
-                Text { text: "Bot count: " + Math.round(installBots.value); color: root.ink; font.pixelSize: 22 * root.s }
-                Slider { id: installBots; width: 720 * root.s; from: 0; to: 2000; stepSize: 50; value: 500; live: true; KeyNavigation.down: installButton }
+                Text { visible: root.installProviderId !== "azerothcore-coa"; text: "Bot count: " + Math.round(installBots.value); color: root.ink; font.pixelSize: 22 * root.s }
+                Slider { id: installBots; visible: root.installProviderId !== "azerothcore-coa"; width: 720 * root.s; from: 0; to: 2000; stepSize: 50; value: 500; live: true; KeyNavigation.down: installButton }
+                CheckBox { visible: root.installProviderId === "azerothcore-coa"; text: "Enable AutoBalance for solo dungeons and raids"; checked: root.installAutoBalance; font.pixelSize: 18 * root.s; onToggled: root.installAutoBalance = checked }
+                Text { visible: root.installProviderId === "azerothcore-coa"; width: 940 * root.s; text: "Requires your own matching Ascension native-v4 client with Extensions.dll. CoA support is experimental; the client is never downloaded by Azeroth Control."; color: root.gold; font.pixelSize: 15 * root.s; wrapMode: Text.Wrap }
                 Text { text: "The installer estimates disk usage and creates the managed containers. WoW files are never downloaded or added to Steam."; color: root.muted; font.pixelSize: 17 * root.s; wrapMode: Text.Wrap }
                 Row { spacing: 12 * root.s
-                    AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start / Resume installation"; primary: true; width: 290 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: { var chosenProfile = root.installProfiles[installProfile.selectedIndex]; control.installServer({"profile": chosenProfile.id, "clientPath": installClient.text, "bots": Math.round(installBots.value), "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": "Azeroth " + chosenProfile.name, "accountName": root.firstAccount, "accountPassword": root.firstPassword}) } KeyNavigation.up: installBots; KeyNavigation.right: pauseInstallButton }
+                    AzButton { id: installButton; text: control.installRunning ? "Installing…" : "Start / Resume installation"; primary: true; width: 290 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.installRunning && !control.busy; onClicked: { var profiles = root.installProviderId === "azerothcore-coa" ? root.coaProfiles : root.installProfiles; var chosenProfile = profiles[installProfile.selectedIndex]; var chosenModules = root.installProviderId === "azerothcore-coa" ? ["ascension-compat"].concat(root.installAutoBalance ? ["autobalance"] : []) : ["playerbots", "dungeon-clear", "aoe-loot", "transmog", "learn-spells", "auction-house", "multibot-bridge"]; control.installServer({"provider": root.installProviderId, "profile": chosenProfile.id, "clientPath": installClient.text, "bots": root.installProviderId === "azerothcore-coa" ? 0 : Math.round(installBots.value), "modules": chosenModules, "installRoot": "/home/deck/.local/share/azeroth-control", "serverName": root.installProviderId === "azerothcore-coa" ? "Conquest of Azeroth" : "Azeroth " + chosenProfile.name, "accountName": root.firstAccount, "accountPassword": root.firstPassword}) } KeyNavigation.up: installBots; KeyNavigation.right: pauseInstallButton }
                     AzButton { id: pauseInstallButton; text: control.installPaused ? "Resume" : "Pause"; width: 150 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; visible: control.installRunning; onClicked: control.pauseInstallation(); KeyNavigation.left: installButton; KeyNavigation.right: cancelInstallButton }
                     AzButton { id: cancelInstallButton; text: "Cancel"; danger: true; width: 150 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; visible: control.installRunning; onClicked: control.cancelInstallation(); KeyNavigation.left: pauseInstallButton }
                 }
@@ -699,7 +721,8 @@ ApplicationWindow {
                 Slider { id: dropSlider; width: 720 * root.s; from: 0; to: 20; stepSize: 0.5; value: control.dropRate; live: true }
                 Text { text: "Spawn rate: " + spawnSlider.value.toFixed(1) + "x"; color: root.ink; font.pixelSize: 22 * root.s }
                 Slider { id: spawnSlider; width: 720 * root.s; from: 0.25; to: 20; stepSize: 0.25; value: control.spawnRate; live: true }
-                AzButton { text: "Save world settings"; primary: true; width: 250 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy; onClicked: control.saveSettings({"xpRate": Number(xpSlider.value), "dropRate": Number(dropSlider.value), "spawnRate": Number(spawnSlider.value)}, control.activeRealm) }
+                CheckBox { visible: control.supportsAutoBalance; text: "AutoBalance solo instances"; checked: root.worldAutoBalance; font.pixelSize: 18 * root.s; onToggled: root.worldAutoBalance = checked }
+                AzButton { text: "Save world settings"; primary: true; width: 250 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy; onClicked: { var values = {"xpRate": Number(xpSlider.value), "dropRate": Number(dropSlider.value), "spawnRate": Number(spawnSlider.value)}; if (control.supportsAutoBalance) values.autoBalance = root.worldAutoBalance; control.saveSettings(values, control.activeRealm) } }
             }
 
             Column {
@@ -951,7 +974,7 @@ ApplicationWindow {
                 Text { text: "Managed server maintenance"; color: root.ink; font.pixelSize: 24 * root.s }
                 Row {
                     spacing: 14 * root.s
-                    AzButton { id: updateButton; text: "Update server"; width: 220 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy; onClicked: control.maintenanceAction("update"); KeyNavigation.right: repairButton }
+                    AzButton { id: updateButton; text: control.supportsManagedUpdates ? "Update server" : "CoA revision pinned"; width: 220 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy && control.supportsManagedUpdates; onClicked: control.maintenanceAction("update"); KeyNavigation.right: repairButton }
                     AzButton { id: repairButton; text: "Repair installation"; width: 250 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy; onClicked: control.maintenanceAction("repair"); KeyNavigation.left: updateButton }
                     AzButton { text: "Create backup"; width: 210 * root.s; height: 62 * root.s; font.pixelSize: 18 * root.s; enabled: !control.busy; onClicked: control.apiPost("backup", "/api/backup", {}) }
                 }

@@ -23,17 +23,20 @@ if [[ -z "$APPIMAGE" || ! -f "$APPIMAGE" ]]; then
     exit 2
 fi
 
-# Steam's overlay environment can crash Electron zygote processes on SteamOS.
+# Keep Steam's injected renderer and Wayland variables out of the native Qt UI.
 unset LD_PRELOAD
 unset LD_LIBRARY_PATH
 unset QT_IM_MODULE
 unset XMODIFIERS
-export GTK_IM_MODULE=simple
-export ELECTRON_DISABLE_SANDBOX=1
-export AZEROTH_FULLSCREEN=1
+unset WAYLAND_DISPLAY
+unset GAMESCOPE_WAYLAND_DISPLAY
+unset GAMESCOPE_DISPLAY_DISABLED
+unset ENABLE_GAMESCOPE_WSI
+export QT_QPA_PLATFORM=xcb
+export QSG_RHI_BACKEND=opengl
 
 chmod u+x "$APPIMAGE"
-setsid "$APPIMAGE" --no-sandbox --disable-gpu-sandbox --disable-features=UseChromeOSDirectVideoDecoder >>"$LOG_DIR/appimage.log" 2>&1 &
+setsid "$APPIMAGE" --fullscreen >>"$LOG_DIR/appimage.log" 2>&1 &
 APP_PID="$!"
 
 shutdown() {

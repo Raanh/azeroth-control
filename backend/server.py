@@ -204,6 +204,7 @@ REALMS = {
     "progression": {"config": RUNTIME / "etc", "port": 8085, "name": "AzerothCore Progression", "characters": "acore_characters"},
     "endgame": {"config": RUNTIME / "endgame/etc", "port": 8086, "name": "AzerothCore Endgame 80", "characters": "acore_characters_endgame"},
     "qa": {"config": RUNTIME / "qa/etc", "port": 8087, "name": "AzerothCore QA Custom", "characters": "acore_characters_qa"},
+    "coa": {"config": RUNTIME / "etc", "port": 8085, "name": "Conquest of Azeroth", "characters": "acore_characters"},
 }
 
 SETTING_MAP = {
@@ -222,6 +223,7 @@ SETTING_MAP = {
     "playerWeight": ("modules/playerbots.conf", "AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight", float, 0.0, 30.0),
     "aoeLoot": ("modules/mod_aoe_loot.conf", "AOELoot.Enable", bool, 0, 1),
     "aoeLootRange": ("modules/mod_aoe_loot.conf", "AOELoot.Range", float, 1.0, 100.0),
+    "autoBalance": ("modules/AutoBalance.conf", "AutoBalance.Enable.Global", bool, 0, 1),
 }
 DROP_RATE_KEYS = (
     "Rate.Drop.Item.Poor", "Rate.Drop.Item.Normal", "Rate.Drop.Item.Uncommon",
@@ -233,6 +235,46 @@ job_lock = threading.Lock()
 job = {"running": False, "label": "", "ok": True, "message": ""}
 
 
+def installation_selection() -> dict:
+    try:
+        return json.loads((ROOT / "install-selection.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def provider_id() -> str:
+    return str(installation_selection().get("provider") or "azerothcore-playerbots")
+
+
+def provider_capabilities() -> dict:
+    coa = provider_id() == "azerothcore-coa"
+    return {
+        "bots": not coa,
+        "queues": not coa,
+        "partyBuilder": not coa,
+        "autoBalance": (RUNTIME / "etc/modules/AutoBalance.conf").is_file(),
+        "customClient": coa,
+        "managedUpdates": not coa,
+    }
+
+
+def default_realm() -> str:
+    return "coa" if provider_id() == "azerothcore-coa" else "progression"
+
+
+def client_executable() -> Path:
+    selection = installation_selection()
+    configured = str(selection.get("clientExecutable") or "")
+    if configured:
+        return Path(configured).expanduser()
+    raw_client = str(selection.get("clientPath") or "")
+    if not raw_client:
+        return ROOT / ".missing-wow-client"
+    client = Path(raw_client).expanduser()
+    hd = client / "Wow-HD.exe"
+    return hd if hd.is_file() else client / "Wow.exe"
+
+
 def run(args: list[str], timeout: int = 15, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, input=input_text, capture_output=True, timeout=timeout, check=False)
 
@@ -240,13 +282,14 @@ def run(args: list[str], timeout: int = 15, input_text: str | None = None) -> su
 def active_realm() -> str:
     try:
         value = (RUNTIME / "active-realm").read_text().strip()
-        return value if value in REALMS else "progression"
+        return value if value in REALMS else default_realm()
     except OSError:
-        return "progression"
+        return default_realm()
 
 
 def available_realms() -> list[str]:
-    available = [name for name, value in REALMS.items() if (Path(value["config"]) / "worldserver.conf").exists()]
+    candidates = ("coa",) if provider_id() == "azerothcore-coa" else ("progression", "endgame", "qa")
+    available = [name for name in candidates if (Path(REALMS[name]["config"]) / "worldserver.conf").exists()]
     current = active_realm()
     return available or [current]
 
@@ -385,7 +428,10 @@ def online_human_players() -> list[dict]:
 
 
 def party_payload() -> dict:
+    if not provider_capabilities()["partyBuilder"]:
+        return {"available": False, "bridgeReady": False, "bridgeVersion": "", "serverOnline": container_state()[0] == "running", "players": []}
     return {
+        "available": True,
         "bridgeReady": bool(party_bridge_version()),
         "bridgeVersion": party_bridge_version(),
         "serverOnline": container_state()[0] == "running",
@@ -413,6 +459,8 @@ def validate_party_slots(raw_slots) -> list[dict]:
 
 
 def build_party(payload: dict) -> dict:
+    if not provider_capabilities()["partyBuilder"]:
+        raise RuntimeError("Party Builder is unavailable for the CoA provider because it does not include Playerbots")
     if not party_bridge_version():
         raise RuntimeError("This managed server needs the Azeroth Control Party Bridge update")
     if container_state()[0] != "running":
@@ -477,6 +525,8 @@ def build_party(payload: dict) -> dict:
 
 
 def party_action(payload: dict, action: str) -> dict:
+    if not provider_capabilities()["partyBuilder"]:
+        raise RuntimeError("Party recovery is unavailable for the CoA provider")
     if action not in {"summon", "prepare", "recover", "disband"}:
         raise ValueError("Unknown party recovery action")
     version = party_bridge_version()
@@ -539,7 +589,9 @@ def status_payload() -> dict:
         "port": port,
         "state": "online" if ready else "offline",
         "uptime": human_duration(started),
-        "bots": online_bot_count(realm, logs) if ready else 0,
+        "bots": online_bot_count(realm, logs) if ready and provider_capabilities()["bots"] else 0,
+        "provider": provider_id(),
+        "capabilities": provider_capabilities(),
         "cpu": cpu,
         "memory": memory,
         "job": dict(job),
@@ -639,6 +691,8 @@ def replace_bot_count(realm: str, count: int) -> None:
 def save_settings(realm: str, payload: dict) -> dict:
     base = REALMS[realm]["config"]
     if "botCount" in payload:
+        if not provider_capabilities()["bots"]:
+            raise ValueError("Bot population is unavailable for the CoA provider")
         count = int(payload["botCount"])
         if not 0 <= count <= 2000:
             raise ValueError("Bot count must be between 0 and 2,000")
@@ -655,6 +709,12 @@ def save_settings(realm: str, payload: dict) -> dict:
                 raise ValueError(f"{name} must be between {low} and {high}")
             value = f"{number:g}"
         replace_conf_value(base / relative, key, value)
+        if name == "autoBalance" and provider_id() == "azerothcore-coa":
+            replace_conf_value(
+                base / "modules/mod_ascension_compat.conf",
+                "AscensionCompat.LevelScaling",
+                "0" if bool(raw) else "1",
+            )
     if "xpRate" in payload:
         rate = float(payload["xpRate"])
         if not 0 <= rate <= 20:
@@ -734,13 +794,14 @@ def read_version(path: Path) -> str:
 
 
 def maintenance_payload() -> dict:
+    capabilities = provider_capabilities()
     installed = party_bridge_version()
     bundled = read_version(ROOT / "state" / "bundled" / "mod-azeroth-control-bridge" / "VERSION")
     free = shutil.disk_usage(ROOT).free if ROOT.exists() else 0
     checks = [
         {"name": "Managed controls", "ok": CONTROL.is_file() and UPDATE_CONTROL.is_file() and REPAIR_CONTROL.is_file()},
         {"name": "AzerothCore source", "ok": (ROOT / "core" / ".git").exists()},
-        {"name": "WoW client", "ok": WOW_LAUNCHER.exists()},
+        {"name": "WoW client", "ok": client_executable().exists()},
         {"name": "Podman images", "ok": False},
     ]
     # install.env is a shell file; querying the active container is a safer image
@@ -748,9 +809,11 @@ def maintenance_payload() -> dict:
     checks[-1]["ok"] = run(["podman", "image", "exists", container_image_name()]).returncode == 0
     return {
         "managed": (ROOT / "install-selection.json").exists(),
+        "provider": provider_id(),
         "installedVersion": installed,
         "bundledVersion": bundled,
-        "updateAvailable": bool(bundled and bundled != installed),
+        "updateAvailable": capabilities["managedUpdates"] and bool(bundled and bundled != installed),
+        "managedUpdates": capabilities["managedUpdates"],
         "freeBytes": free,
         "checks": checks,
         "rollbackImage": read_version(ROOT / "state" / "last-worldserver-rollback-image"),
@@ -769,6 +832,8 @@ def container_image_name() -> str:
 
 
 def update_managed_server() -> str:
+    if not provider_capabilities()["managedUpdates"]:
+        raise RuntimeError("In-app source updates are disabled for experimental CoA installs; use a newly validated provider revision")
     if not UPDATE_CONTROL.exists():
         raise RuntimeError("Managed update script is missing. Restart Azeroth Control and try again.")
     if container_state()[0] != "running":
@@ -973,8 +1038,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    if not STATIC_ROOT.exists():
-        raise SystemExit(f"Frontend build is missing: {STATIC_ROOT}")
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Azeroth Control: http://{HOST}:{PORT}")

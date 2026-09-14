@@ -1,6 +1,6 @@
 # Azeroth Control
 
-**A gamepad-friendly Steam Deck and SteamOS installer and control center for a local AzerothCore WotLK 3.3.5a server with Playerbots.**
+**A gamepad-friendly Steam Deck and SteamOS installer and control center for local AzerothCore Playerbots and experimental Conquest of Azeroth servers.**
 
 Azeroth Control is built for people searching for an easier way to run an
 AzerothCore Playerbots server on a Steam Deck, Steam Machine, living-room Linux
@@ -24,7 +24,8 @@ module authors.
 > being migrated from Electron/Chromium to Qt 6 Quick for much faster startup,
 > lower overhead, and more predictable SteamOS Gaming Mode behavior. It is
 > usable for testing, but unfinished flows and bugs are expected. The latest
-> packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
+> native test build is [v0.4.0-preview.12](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.12);
+> the packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
 
 ## What the 0.4 native preview can do
 
@@ -33,6 +34,8 @@ module authors.
 - Detects CPU threads, memory, free disk space, and required local tools.
 - Estimates download size, installed size, and build time before installation.
 - Installs from the open-source AzerothCore Playerbots provider.
+- Can alternatively install the experimental open-source CoA adaptation from a
+  pinned revision, with no Playerbots dependency.
 - Offers Progressive 1–80, Instant Level 80, and Custom server profiles.
 - Recommends a bot population from the device hardware and supports up to 2,000
   configured bots.
@@ -80,6 +83,7 @@ module authors.
   flow continue.
 - Configure automatic battleground joining and dungeon/BG deserter penalties.
 - Change XP, item drop, and creature respawn rates.
+- Enable or disable AutoBalance for undersized CoA dungeon and raid groups.
 - Enable and tune AoE looting when the matching server module is installed.
 - Back up configuration files automatically before supported values change.
 
@@ -135,6 +139,23 @@ their original repositories and retain their original licenses.
 Upstream projects can change independently. A catalog entry is not a promise
 that every future upstream commit will remain compatible with this preview.
 
+## Experimental Conquest of Azeroth provider
+
+Choose **Conquest of Azeroth · Experimental** during setup to build the
+independent `azerothcore-wotlk-coa` adaptation. Azeroth Control imports its
+verified world-data baseline before first startup and can compile a pinned
+AutoBalance module. With AutoBalance enabled, normal and heroic instances and
+raids use a minimum player count of one; CoA's separate creature level scaler
+is disabled to avoid double scaling. World Settings can set kill, quest and
+exploration XP together from 0× to 20×, including 5×.
+
+You must provide the matching Ascension native-v4 client containing `Wow.exe`
+and `Extensions.dll`. Azeroth Control does not download or redistribute that
+client. Playerbots, queue controls and Party Builder are unavailable for this
+provider. CoA gameplay compatibility remains upstream experimental, and the
+in-app source updater is intentionally disabled until a newer revision is
+explicitly validated.
+
 ## Requirements
 
 The native preview is primarily developed and tested for **x86-64 SteamOS 3.x** on a
@@ -161,7 +182,7 @@ You should have:
 
 1. Open the [Releases](https://github.com/raanh/azeroth-control/releases) page
    and download both:
-   - `Azeroth-Control-0.2.0-x86_64.AppImage`
+   - `Azeroth-Control-0.4.0-preview.12-x86_64.AppImage`
    - `Azeroth-Control-SteamOS.sh`
 2. In Desktop Mode, create `~/Applications` and move both downloaded files into
    it.

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/install.env"
+SUPPORTS_BOTS="${SUPPORTS_BOTS:-1}"
 
 printf '[1/4] Checking required SteamOS tools…\n'
 for command in podman git python3; do
@@ -17,9 +18,15 @@ for image in "$WORLD_IMAGE" "$AUTH_IMAGE" "$IMPORT_IMAGE" "$DATA_IMAGE"; do
 done
 
 printf '[3/4] Repairing local permissions and runtime folders…\n'
-mkdir -p "$ROOT/runtime/etc" "$ROOT/runtime/logs" "$ROOT/runtime/modules/mod-playerbots/data/sql" "$ROOT/state"
+mkdir -p "$ROOT/runtime/etc" "$ROOT/runtime/logs" "$ROOT/runtime/modules" "$ROOT/state"
+if [[ "$SUPPORTS_BOTS" == 1 ]]; then
+    mkdir -p "$ROOT/runtime/modules/mod-playerbots/data/sql"
+fi
 chmod 700 "$ROOT/bin"
 chmod 755 "$ROOT/bin/server-control" "$ROOT/bin/autologin" "$ROOT/bin/update-server" "$ROOT/bin/repair-server"
+if [[ -f "$ROOT/bin/coa-mysql" ]]; then
+    chmod 755 "$ROOT/bin/coa-mysql"
+fi
 
 printf '[4/4] Running the managed health check…\n'
 if "$ROOT/bin/server-control" status >/dev/null 2>&1; then

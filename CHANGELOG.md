@@ -2,6 +2,25 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.12] - 2026-09-14
+
+### Added
+
+- Experimental Conquest of Azeroth provider pinned to a reviewed upstream
+  revision and requiring a user-supplied native-v4 Ascension client.
+- Verified CoA world-database bootstrap before first worldserver startup.
+- Optional pinned AutoBalance module for solo dungeons and raids.
+- Provider capability handling that removes Playerbots, queues and Party
+  Builder controls from CoA installations.
+- Native Qt AppImage release workflow for x86-64 SteamOS.
+
+### Changed
+
+- XP, item-drop and spawn-rate controls now apply to CoA; XP updates kill,
+  quest and exploration rates together and supports a 5× value.
+- CoA's built-in creature level scaling is disabled while AutoBalance is active
+  to avoid stacking two independent scaling systems.
+
 ## [0.1.0] - 2026-08-24
 
 First public SteamOS preview.

@@ -97,7 +97,7 @@ function syncManagedScripts() {
     for (const [sourceName, targetName] of [
       ['server-control-managed', 'server-control'], ['launch-wow-managed', 'launch-wow'],
       ['autologin-managed', 'autologin'], ['update-server-managed', 'update-server'],
-      ['repair-server-managed', 'repair-server'],
+      ['repair-server-managed', 'repair-server'], ['coa-mysql-managed', 'coa-mysql'],
     ]) {
       const source = path.join(resources(), 'scripts', sourceName);
       const target = path.join(bin, targetName);
@@ -135,7 +135,7 @@ function readState() {
     if (!fs.existsSync(path.join(managedPath, '.install-checkpoints', 'complete')) || state.installations.some((item) => item.path === managedPath)) continue;
     const selection = readJson(path.join(managedPath, 'install-selection.json'), {});
     const id = 'managed-' + Buffer.from(managedPath).toString('hex').slice(-12);
-    state.installations.push({ id, name: selection.serverName || 'Azeroth ' + (selection.profile || 'server'), path: managedPath, provider: 'azerothcore-playerbots', imported: false, createdAt: new Date().toISOString() });
+    state.installations.push({ id, name: selection.serverName || 'Azeroth ' + (selection.profile || 'server'), path: managedPath, provider: selection.provider || 'azerothcore-playerbots', imported: false, createdAt: new Date().toISOString() });
     state.activeInstallationId = id;
     state.onboardingComplete = true;
     changed = true;
@@ -760,7 +760,7 @@ ipcMain.handle('install-start', async (_event, selection) => {
       const serverRoot = path.join(selection.installRoot, 'servers', selection.serverId || 'default');
       const state = readState();
       const id = 'managed-' + Buffer.from(serverRoot).toString('hex').slice(-12);
-      const entry = { id, name: selection.serverName || 'Azeroth ' + selection.profile, path: serverRoot, provider: 'azerothcore-playerbots', imported: false, createdAt: new Date().toISOString() };
+      const entry = { id, name: selection.serverName || 'Azeroth ' + selection.profile, path: serverRoot, provider: selection.provider || 'azerothcore-playerbots', imported: false, createdAt: new Date().toISOString() };
       state.installations = [...state.installations.filter((item) => item.path !== serverRoot), entry];
       state.activeInstallationId = id;
       state.onboardingComplete = true;
