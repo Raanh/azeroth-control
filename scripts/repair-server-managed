@@ -13,7 +13,11 @@ done
 printf '[2/4] Checking managed files and client…\n'
 [[ -d "$ROOT/core/.git" ]] || { printf 'AzerothCore source tree is missing.\n' >&2; exit 2; }
 [[ -f "$CLIENT_EXECUTABLE" ]] || { printf 'Configured WoW executable is missing: %s\n' "$CLIENT_EXECUTABLE" >&2; exit 2; }
-for image in "$WORLD_IMAGE" "$AUTH_IMAGE" "$IMPORT_IMAGE" "$DATA_IMAGE"; do
+images=("$WORLD_IMAGE" "$AUTH_IMAGE" "$IMPORT_IMAGE" "$DATA_IMAGE")
+if [[ "${PROVIDER_ID:-}" == azerothcore-coa ]]; then
+    images+=("${TOOLS_IMAGE:?CoA tools image is missing; resume installation first}")
+fi
+for image in "${images[@]}"; do
     podman image exists "$image" || { printf 'Required image is missing: %s\n' "$image" >&2; exit 2; }
 done
 

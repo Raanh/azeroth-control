@@ -6,7 +6,7 @@ source "$ROOT/install.env"
 PROVIDER_ID="${PROVIDER_ID:-azerothcore-playerbots}"
 SUPPORTS_BOTS="${SUPPORTS_BOTS:-1}"
 AUTOBALANCE_ENABLED="${AUTOBALANCE_ENABLED:-0}"
-COA_DBC_DIR="${COA_DBC_DIR:-}"
+TOOLS_IMAGE="${TOOLS_IMAGE:-}"
 RUNTIME="$ROOT/runtime"
 MODULES_DIR="$RUNTIME/modules"
 case "$REALM_KEY" in
@@ -26,6 +26,37 @@ DB_INFO="$DB_CONTAINER;3306;root;$DB_PASSWORD"
 
 port_ready() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 remove_container() { podman rm -f "$1" >/dev/null 2>&1 || true; }
+
+install_coa_client_dbc() {
+    [[ "$PROVIDER_ID" == azerothcore-coa ]] || return 0
+    [[ -n "$TOOLS_IMAGE" ]] || { printf 'CoA client-data extractor image is missing. Resume the installation with the current Azeroth Control release.\n' >&2; return 1; }
+    [[ -d "$CLIENT_PATH/Data" ]] || { printf 'The configured CoA client Data directory is missing: %s\n' "$CLIENT_PATH/Data" >&2; return 1; }
+    [[ -f "$ROOT/state/coa-client-dbc-installed" ]] && return 0
+
+    # The downloaded stock server data is enough for an ordinary WotLK realm,
+    # but CoA needs the matching custom Spell.dbc and related files from the
+    # user's Ascension client. Extract into a fresh managed staging directory;
+    # only copy it into the live data volume after Spell.dbc was produced.
+    local extract_root
+    extract_root="$(mktemp -d "$ROOT/state/coa-client-dbc.XXXXXX")"
+    printf 'Extracting matching CoA DBC files from the selected Ascension client…\n'
+    podman run --rm --userns=keep-id --entrypoint /bin/bash \
+        -v "$CLIENT_PATH:/client:ro" -v "$extract_root:/output" "$TOOLS_IMAGE" -lc '
+            set -Eeuo pipefail
+            test -d /client/Data
+            /azerothcore/env/dist/bin/map_extractor -e 2 -i /client -o /output
+            test -s /output/dbc/Spell.dbc
+        '
+    podman run --rm --userns=keep-id --entrypoint /bin/bash \
+        -v "$DATA_VOLUME:/azerothcore/env/dist/data" -v "$extract_root:/input:ro" "$TOOLS_IMAGE" -lc '
+            set -Eeuo pipefail
+            test -s /input/dbc/Spell.dbc
+            mkdir -p /azerothcore/env/dist/data/dbc
+            cp -a /input/dbc/. /azerothcore/env/dist/data/dbc/
+            test -s /azerothcore/env/dist/data/dbc/Spell.dbc
+        '
+    touch "$ROOT/state/coa-client-dbc-installed"
+}
 
 set_conf_value() {
     local path="$1" key="$2" value="$3"
@@ -52,7 +83,8 @@ stop_server() {
 }
 
 start_server() {
-    if port_ready 3724 && port_ready "$WORLD_PORT"; then
+    if port_ready 3724 && port_ready "$WORLD_PORT" \
+       && { [[ "$PROVIDER_ID" != azerothcore-coa ]] || [[ -f "$ROOT/state/coa-client-dbc-installed" ]]; }; then
         printf '%s is already online.\n' "$REALM_NAME"
         return 0
     fi
@@ -61,7 +93,8 @@ start_server() {
     # because one readiness probe happened during that pause.
     if [[ "$(podman inspect -f '{{.State.Status}}' "$DB_CONTAINER" 2>/dev/null || true)" == running \
        && "$(podman inspect -f '{{.State.Status}}' "$AUTH_CONTAINER" 2>/dev/null || true)" == running \
-       && "$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)" == running ]]; then
+       && "$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)" == running \
+       && { [[ "$PROVIDER_ID" != azerothcore-coa ]] || [[ -f "$ROOT/state/coa-client-dbc-installed" ]]; }; then
         for _ in $(seq 1 40); do
             if port_ready 3724 && port_ready "$WORLD_PORT"; then
                 printf '%s is already online.\n' "$REALM_NAME"
@@ -118,6 +151,7 @@ start_server() {
         updates_enable_databases=3
     fi
     podman run --rm --name "${CONTAINER_PREFIX}-client-data-init" -v "$DATA_VOLUME:/azerothcore/env/dist/data" "$DATA_IMAGE"
+    install_coa_client_dbc
     import_args=(--rm --name "${CONTAINER_PREFIX}-db-import" --userns=keep-id --network "$NETWORK"
         -e AC_DATA_DIR=/azerothcore/env/dist/data -e AC_LOGS_DIR=/azerothcore/env/dist/logs
         -e "AC_UPDATES_ENABLE_DATABASES=$updates_enable_databases"
@@ -141,9 +175,7 @@ start_server() {
     if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
         ascension_config="$CONFIG_DIR/modules/mod_ascension_compat.conf"
         [[ -f "$ascension_config" ]] || { printf 'CoA compatibility configuration is missing.\n' >&2; return 1; }
-        if [[ -n "$COA_DBC_DIR" ]]; then
-            set_conf_value "$ascension_config" AscensionCompat.DbcDirectory '"/azerothcore/env/dist/data/dbc/Ascension"'
-        fi
+        set_conf_value "$ascension_config" AscensionCompat.DbcDirectory '"/azerothcore/env/dist/data/dbc"'
         if [[ "$AUTOBALANCE_ENABLED" == 1 ]]; then
             autobalance_config="$CONFIG_DIR/modules/AutoBalance.conf"
             [[ -f "$autobalance_config" ]] || { printf 'AutoBalance was selected but its configuration was not installed.\n' >&2; return 1; }
@@ -182,9 +214,6 @@ start_server() {
             -e "AC_AI_PLAYERBOT_MAX_RANDOM_BOTS=$BOT_COUNT" -e AC_AI_PLAYERBOT_RANDOM_BOT_ALLIANCE_RATIO=50
             -e AC_AI_PLAYERBOT_RANDOM_BOT_HORDE_RATIO=50 -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG=1
             -e AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG=1)
-    fi
-    if [[ "$PROVIDER_ID" == azerothcore-coa && -n "$COA_DBC_DIR" ]]; then
-        world_args+=(-v "$COA_DBC_DIR:/azerothcore/env/dist/data/dbc/Ascension:ro")
     fi
     podman run "${world_args[@]}" "$WORLD_IMAGE" >/dev/null
 

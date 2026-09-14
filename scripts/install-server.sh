@@ -258,23 +258,11 @@ if [[ "$PROVIDER_ID" == azerothcore-coa && "$PROFILE" != coa ]] || [[ "$PROVIDER
     exit 2
 fi
 REALM_NAME="${SERVER_NAME:-$REALM_NAME}"
-COA_DBC_DIR=""
-if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
-    while IFS= read -r -d '' appearance_dbc; do
-        candidate_dir="$(dirname "$appearance_dbc")"
-        if [[ -f "$candidate_dir/ItemAppearances.dbc" && -f "$candidate_dir/VanityCollection.dbc" ]]; then
-            COA_DBC_DIR="$candidate_dir"
-            break
-        fi
-    done < <(find "$CLIENT_PATH" -maxdepth 6 -type f -name Appearances.dbc -print0 2>/dev/null)
-    if [[ -z "$COA_DBC_DIR" ]]; then
-        printf 'Note: custom collection DBCs were not found as loose files. Gameplay can start, but the CoA appearance collection may be incomplete.\n'
-    fi
-fi
 WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:$IMAGE_TAG"
 AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:$IMAGE_TAG"
 IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:$IMAGE_TAG"
 DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:$IMAGE_TAG"
+TOOLS_IMAGE="localhost/azeroth-control/wotlk-tools:$IMAGE_TAG"
 ENGINE_FINGERPRINT="$({
     git -C "$CORE" rev-parse HEAD
     find "$CORE/modules" -mindepth 1 -maxdepth 1 -type d -name 'mod-*' -print0 | sort -z | while IFS= read -r -d '' module; do
@@ -287,11 +275,11 @@ SHARED_WORLD_IMAGE="localhost/azeroth-control/wotlk-worldserver:engine-$ENGINE_F
 SHARED_AUTH_IMAGE="localhost/azeroth-control/wotlk-authserver:engine-$ENGINE_FINGERPRINT"
 SHARED_IMPORT_IMAGE="localhost/azeroth-control/wotlk-db-import:engine-$ENGINE_FINGERPRINT"
 SHARED_DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:engine-$ENGINE_FINGERPRINT"
+SHARED_TOOLS_IMAGE="localhost/azeroth-control/wotlk-tools:engine-$ENGINE_FINGERPRINT"
 {
     printf 'PROVIDER_ID=%q\n' "$PROVIDER_ID"
     printf 'SUPPORTS_BOTS=%q\n' "$SUPPORTS_BOTS"
     printf 'AUTOBALANCE_ENABLED=%q\n' "$AUTOBALANCE_ENABLED"
-    printf 'COA_DBC_DIR=%q\n' "$COA_DBC_DIR"
     printf 'PROFILE=%q\n' "$PROFILE"
     printf 'REALM_KEY=%q\n' "$REALM_KEY"
     printf 'REALM_NAME=%q\n' "$REALM_NAME"
@@ -309,6 +297,7 @@ SHARED_DATA_IMAGE="localhost/azeroth-control/wotlk-client-data:engine-$ENGINE_FI
     printf 'AUTH_IMAGE=%q\n' "$AUTH_IMAGE"
     printf 'IMPORT_IMAGE=%q\n' "$IMPORT_IMAGE"
     printf 'DATA_IMAGE=%q\n' "$DATA_IMAGE"
+    printf 'TOOLS_IMAGE=%q\n' "$TOOLS_IMAGE"
 } > "$SERVER_ROOT/install.env"
 printf '%s\n' "$CONTAINER_PREFIX" > "$SERVER_ROOT/state/container-prefix"
 cp "$SCRIPT_DIR/server-control-managed" "$SERVER_ROOT/bin/server-control"
@@ -426,6 +415,18 @@ if [[ ! -f "$CHECKPOINTS/images" ]]; then
     fi
 else
     printf '[4/6] Container images already exist; resuming.\n'
+fi
+
+if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+    if ! podman image exists "$SHARED_TOOLS_IMAGE"; then
+        printf '[4/6] Preparing the CoA client-data extractor…\n'
+        BUILD_ARGS=(--layers --build-arg "USER_ID=$HOST_UID" --build-arg "GROUP_ID=$HOST_GID" --build-arg DOCKER_USER=acore -f "$DOCKERFILE")
+        podman build "${BUILD_ARGS[@]}" --target tools -t "$SHARED_TOOLS_IMAGE" "$CORE"
+    fi
+    podman tag "$SHARED_TOOLS_IMAGE" "$TOOLS_IMAGE"
+    # Existing CoA installations used stock downloaded DBCs. Force one
+    # managed restart so server-control can extract matching client DBCs.
+    [[ -f "$SERVER_ROOT/state/coa-client-dbc-installed" ]] || rm -f "$CHECKPOINTS/health-check"
 fi
 
 if [[ ! -f "$CHECKPOINTS/health-check" ]]; then

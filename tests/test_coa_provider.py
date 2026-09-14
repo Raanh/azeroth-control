@@ -82,6 +82,15 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('9791801053f828d1ccdab1a4c17e64852d3ebe0fa708b91fa3674d0805d15bc8', installer)
         self.assertIn('python3 "$ENDPOINT_PATCHER" --input "$EXTENSIONS_DLL" --output "$EXTENSIONS_CANDIDATE"', installer)
 
+    def test_coa_extracts_matching_client_dbcs_before_worldserver_starts(self):
+        installer = (REPOSITORY / "scripts/install-server.sh").read_text()
+        control = (REPOSITORY / "scripts/server-control-managed").read_text()
+        self.assertIn('--target tools -t "$SHARED_TOOLS_IMAGE"', installer)
+        self.assertIn('coa-client-dbc-installed', installer)
+        self.assertIn('map_extractor -e 2 -i /client -o /output', control)
+        self.assertIn('test -s /output/dbc/Spell.dbc', control)
+        self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc'", control.replace('"', ''))
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -435,7 +435,7 @@ void Controller::removeInstallation(const QString &id, bool deleteFiles)
             QProcess::execute(QStringLiteral("podman"), {QStringLiteral("volume"), QStringLiteral("rm"), QStringLiteral("-f"), prefix + QStringLiteral("-database-data"), prefix + QStringLiteral("-client-data")});
         }
         QStringList images;
-        for (const QString &key : {QStringLiteral("WORLD_IMAGE"), QStringLiteral("AUTH_IMAGE"), QStringLiteral("IMPORT_IMAGE"), QStringLiteral("DATA_IMAGE")}) {
+        for (const QString &key : {QStringLiteral("WORLD_IMAGE"), QStringLiteral("AUTH_IMAGE"), QStringLiteral("IMPORT_IMAGE"), QStringLiteral("DATA_IMAGE"), QStringLiteral("TOOLS_IMAGE")}) {
             const QString image = readEnvValue(envPath, key);
             if (!image.isEmpty()) images.append(image);
         }

@@ -24,7 +24,7 @@ module authors.
 > being migrated from Electron/Chromium to Qt 6 Quick for much faster startup,
 > lower overhead, and more predictable SteamOS Gaming Mode behavior. It is
 > usable for testing, but unfinished flows and bugs are expected. The latest
-> native test build is [v0.4.0-preview.18](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.18);
+> native test build is [v0.4.0-preview.19](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.19);
 > the packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
 
 ## What the 0.4 native preview can do
@@ -162,6 +162,10 @@ For the checksum-pinned native-v4 `Extensions.dll`, the installer keeps a
 upstream local-world-endpoint compatibility fix. An unrecognized DLL is left
 unchanged and reported as incompatible.
 
+The installer also extracts the matching Ascension DBC files from the supplied
+client before the realm starts. The stock downloadable AzerothCore server data
+does not contain CoA's custom spells and cannot be used as a replacement.
+
 ## Requirements
 
 The native preview is primarily developed and tested for **x86-64 SteamOS 3.x** on a
@@ -190,7 +194,7 @@ You should have:
 
 1. Open the [Releases](https://github.com/raanh/azeroth-control/releases) page
    and download both:
-   - `Azeroth-Control-0.4.0-preview.18-x86_64.AppImage`
+   - `Azeroth-Control-0.4.0-preview.19-x86_64.AppImage`
    - `Azeroth-Control-SteamOS.sh`
 2. In Desktop Mode, create `~/Applications` and move both downloaded files into
    it.

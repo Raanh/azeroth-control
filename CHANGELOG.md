@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.19] - 2026-09-14
+
+### Fixed
+
+- Extract the matching Ascension client DBCs, including CoA's custom
+  `Spell.dbc`, into the managed server data before first startup. This replaces
+  incompatible stock WotLK DBC data that prevented character-list loading.
+
 ## [0.4.0-preview.18] - 2026-09-14
 
 ### Fixed
