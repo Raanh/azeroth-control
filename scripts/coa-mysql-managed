@@ -6,5 +6,7 @@ source "$ROOT/install.env"
 
 # CoA's verified world-data importer expects a local mysql executable. Keep
 # credentials out of its arguments and stream SQL into the managed DB container.
+# CoA passes --no-defaults first. MySQL only recognizes option-file controls
+# in that position, so preserve the importer arguments before adding credentials.
 exec podman exec -i "${CONTAINER_PREFIX}-database" \
-    sh -lc 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$@"' sh "$@"
+    sh -lc 'exec mysql "$@" -uroot -p"$MYSQL_ROOT_PASSWORD"' sh "$@"

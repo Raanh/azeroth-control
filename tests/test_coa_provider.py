@@ -63,6 +63,11 @@ class CoAProviderTests(unittest.TestCase):
         self.assertNotIn("for port in 3307", installer)
         self.assertIn("Checkpoint resumes must still receive fixes", installer)
 
+    def test_coa_mysql_wrapper_preserves_importer_options_first(self):
+        wrapper = (REPOSITORY / "scripts/coa-mysql-managed").read_text()
+        self.assertIn('exec mysql "$@" -uroot -p"$MYSQL_ROOT_PASSWORD"', wrapper)
+        self.assertNotIn('exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$@"', wrapper)
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

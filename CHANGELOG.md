@@ -2,6 +2,13 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.16] - 2026-09-14
+
+### Fixed
+
+- Preserve CoA's required first-position MySQL importer options, including
+  `--no-defaults`, before injecting the managed database credentials.
+
 ## [0.4.0-preview.15] - 2026-09-14
 
 ### Fixed
