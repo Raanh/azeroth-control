@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.13] - 2026-09-14
+
+### Fixed
+
+- Bundle the QtQml WorkerScript runtime required by Qt Quick on SteamOS.
+- Reject AppImage builds that report missing QML modules or fail a packaged
+  X11 startup smoke test.
+
 ## [0.4.0-preview.12] - 2026-09-14
 
 ### Added

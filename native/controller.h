@@ -68,7 +68,7 @@ public:
     bool autoBalanceEnabled() const { return m_autoBalanceEnabled; }
     QVariantMap data() const { return m_data; }
     QVariantList installations() const { return m_installations; }
-    QString version() const { return QStringLiteral("0.4.0-preview.12"); }
+    QString version() const { return QStringLiteral("0.4.0-preview.13"); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void serverAction(const QString &action, const QString &realm = {});

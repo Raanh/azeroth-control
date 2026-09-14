@@ -14,7 +14,12 @@ if [[ -z "$APPIMAGE" ]]; then
     )
     shopt -u nullglob
     if (( ${#candidates[@]} )); then
-        APPIMAGE="${candidates[${#candidates[@]} - 1]}"
+        APPIMAGE="${candidates[0]}"
+        for candidate in "${candidates[@]:1}"; do
+            if [[ "$candidate" -nt "$APPIMAGE" ]]; then
+                APPIMAGE="$candidate"
+            fi
+        done
     fi
 fi
 
