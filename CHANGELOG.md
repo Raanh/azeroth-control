@@ -2,6 +2,13 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.22] - 2026-09-14
+
+### Fixed
+
+- Copy extracted CoA DBCs through the same rootless Podman user namespace
+  that owns the existing client-data volume.
+
 ## [0.4.0-preview.21] - 2026-09-14
 
 ### Fixed

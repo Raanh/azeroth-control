@@ -47,12 +47,16 @@ install_coa_client_dbc() {
             /azerothcore/env/dist/bin/map_extractor -e 2 -i /client -o /output
             test -s /output/dbc/Spell.dbc
         '
-    podman run --rm --userns=keep-id --entrypoint /bin/bash \
+    # The stock client-data image creates its named volume without keep-id.
+    # Make the staging tree readable by that same user namespace, then copy
+    # through the default mapping so existing DBC files can be overwritten.
+    chmod -R a+rX "$extract_root"
+    podman run --rm --entrypoint /bin/bash \
         -v "$DATA_VOLUME:/azerothcore/env/dist/data" -v "$extract_root:/input:ro" "$TOOLS_IMAGE" -lc '
             set -Eeuo pipefail
             test -s /input/dbc/Spell.dbc
             mkdir -p /azerothcore/env/dist/data/dbc
-            cp -a /input/dbc/. /azerothcore/env/dist/data/dbc/
+            cp -f /input/dbc/* /azerothcore/env/dist/data/dbc/
             test -s /azerothcore/env/dist/data/dbc/Spell.dbc
         '
     touch "$ROOT/state/coa-client-dbc-installed"
