@@ -13,7 +13,7 @@ jobs:
   appimage:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -46,7 +46,7 @@ jobs:
               --desktop-file packaging/org.azerothcontrol.app.desktop \
               --icon-file public/favicon.svg --plugin qt --output appimage
           chmod +x release/Azeroth-Control-0.4.0-preview.12-x86_64.AppImage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Azeroth-Control-0.4.0-preview.12-x86_64
           path: |
