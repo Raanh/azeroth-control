@@ -2,6 +2,15 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.18] - 2026-09-14
+
+### Fixed
+
+- Apply CoA's checksum-verified native-v4 local-world-endpoint compatibility
+  fix, retaining an adjacent backup of the original `Extensions.dll`. This
+  prevents the native client from corrupting its hook after authentication to
+  a local realm.
+
 ## [0.4.0-preview.17] - 2026-09-14
 
 ### Fixed

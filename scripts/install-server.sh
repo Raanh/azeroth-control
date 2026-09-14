@@ -351,6 +351,33 @@ if [[ "$PROVIDER_ID" == azerothcore-coa && -d "$CLIENT_PATH/Data" ]]; then
         fi
     done < <(find "$CLIENT_PATH/Data" -mindepth 2 -maxdepth 2 -type f -iname realmlist.wtf -print0)
 fi
+if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+    # Native-v4 Extensions.dll rejects a local world endpoint and corrupts an
+    # active hook after a successful auth login. Use CoA's checksum-pinned
+    # generator, never modify the source DLL in place, and retain the original
+    # client file before atomically installing its verified output.
+    ENDPOINT_PATCHER="$CORE/apps/client-compat/patch_world_endpoint.py"
+    EXTENSIONS_DLL="$CLIENT_PATH/Extensions.dll"
+    EXTENSIONS_SHA256="$(sha256sum "$EXTENSIONS_DLL" | awk '{print $1}')"
+    case "$EXTENSIONS_SHA256" in
+        f7b713095aab17a1e376f487290d4b7c4c18931635e4d91136d76db2592be8fa)
+            [[ -f "$ENDPOINT_PATCHER" ]] || { printf 'The CoA client endpoint compatibility tool is missing from the server source.\n' >&2; exit 2; }
+            EXTENSIONS_BACKUP="$CLIENT_PATH/Extensions.dll.azeroth-control-backup"
+            [[ -f "$EXTENSIONS_BACKUP" ]] || cp -a "$EXTENSIONS_DLL" "$EXTENSIONS_BACKUP"
+            EXTENSIONS_CANDIDATE="$CLIENT_PATH/.Extensions.dll.azeroth-control-$RANDOM-$RANDOM"
+            printf 'Applying the verified CoA local world-endpoint compatibility fix…\n'
+            python3 "$ENDPOINT_PATCHER" --input "$EXTENSIONS_DLL" --output "$EXTENSIONS_CANDIDATE"
+            mv -f "$EXTENSIONS_CANDIDATE" "$EXTENSIONS_DLL"
+            ;;
+        9791801053f828d1ccdab1a4c17e64852d3ebe0fa708b91fa3674d0805d15bc8)
+            printf 'CoA local world-endpoint compatibility fix is already installed.\n'
+            ;;
+        *)
+            printf 'Unsupported CoA Extensions.dll checksum (%s). The client was not changed; use the matching pinned native-v4 client.\n' "$EXTENSIONS_SHA256" >&2
+            exit 2
+            ;;
+    esac
+fi
 AUTOLOGIN_FILE="$SERVER_ROOT/state/autologin.json"
 if [[ "$AUTO_LOGIN" == 1 || "$AUTO_LOGIN" == true ]]; then
     python3 - "$AUTOLOGIN_FILE" "$ACCOUNT_NAME" "$ACCOUNT_PASSWORD" <<'PY'

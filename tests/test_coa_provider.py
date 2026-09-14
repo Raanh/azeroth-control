@@ -74,6 +74,14 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('-e "AC_UPDATES_ENABLE_DATABASES=$updates_enable_databases"', control)
         self.assertIn('auth (1) and character (2) updates enabled, but leave world (4)', control)
 
+    def test_coa_uses_upstream_verified_client_endpoint_fix_with_backup(self):
+        installer = (REPOSITORY / "scripts/install-server.sh").read_text()
+        self.assertIn('apps/client-compat/patch_world_endpoint.py', installer)
+        self.assertIn('Extensions.dll.azeroth-control-backup', installer)
+        self.assertIn('f7b713095aab17a1e376f487290d4b7c4c18931635e4d91136d76db2592be8fa', installer)
+        self.assertIn('9791801053f828d1ccdab1a4c17e64852d3ebe0fa708b91fa3674d0805d15bc8', installer)
+        self.assertIn('python3 "$ENDPOINT_PATCHER" --input "$EXTENSIONS_DLL" --output "$EXTENSIONS_CANDIDATE"', installer)
+
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
