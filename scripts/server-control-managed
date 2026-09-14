@@ -83,8 +83,12 @@ stop_server() {
 }
 
 start_server() {
+    local coa_client_dbc_ready=1
+    if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$ROOT/state/coa-client-dbc-installed" ]]; then
+        coa_client_dbc_ready=0
+    fi
     if port_ready 3724 && port_ready "$WORLD_PORT" \
-       && { [[ "$PROVIDER_ID" != azerothcore-coa ]] || [[ -f "$ROOT/state/coa-client-dbc-installed" ]]; }; then
+       && [[ "$coa_client_dbc_ready" == 1 ]]; then
         printf '%s is already online.\n' "$REALM_NAME"
         return 0
     fi
@@ -94,7 +98,7 @@ start_server() {
     if [[ "$(podman inspect -f '{{.State.Status}}' "$DB_CONTAINER" 2>/dev/null || true)" == running \
        && "$(podman inspect -f '{{.State.Status}}' "$AUTH_CONTAINER" 2>/dev/null || true)" == running \
        && "$(podman inspect -f '{{.State.Status}}' "$WORLD_CONTAINER" 2>/dev/null || true)" == running \
-       && { [[ "$PROVIDER_ID" != azerothcore-coa ]] || [[ -f "$ROOT/state/coa-client-dbc-installed" ]]; }; then
+       && "$coa_client_dbc_ready" == 1 ]]; then
         for _ in $(seq 1 40); do
             if port_ready 3724 && port_ready "$WORLD_PORT"; then
                 printf '%s is already online.\n' "$REALM_NAME"

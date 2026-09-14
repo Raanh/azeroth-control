@@ -2,6 +2,13 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.21] - 2026-09-14
+
+### Fixed
+
+- Correct the existing-CoA-server migration readiness condition so it parses
+  on SteamOS Bash before starting the DBC extractor.
+
 ## [0.4.0-preview.20] - 2026-09-14
 
 ### Fixed

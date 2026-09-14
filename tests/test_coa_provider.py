@@ -90,6 +90,7 @@ class CoAProviderTests(unittest.TestCase):
         self.assertIn('map_extractor -e 2 -i /client -o /output', control)
         self.assertIn('test -s /output/dbc/Spell.dbc', control)
         self.assertIn("AscensionCompat.DbcDirectory '/azerothcore/env/dist/data/dbc'", control.replace('"', ''))
+        self.assertIn('local coa_client_dbc_ready=1', control)
 
     def test_existing_coa_server_has_a_client_data_migration_action(self):
         controller = (REPOSITORY / "native/controller.cpp").read_text()
