@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <QUrlQuery>
+#include <algorithm>
 #ifdef Q_OS_LINUX
 #include <signal.h>
 #include <unistd.h>
@@ -197,6 +198,24 @@ void Controller::installServer(const QVariantMap &input)
         selection.insert(QStringLiteral("modules"), isCoa
             ? QVariantList{QStringLiteral("ascension-compat"), QStringLiteral("autobalance")}
             : QVariantList{QStringLiteral("playerbots"), QStringLiteral("dungeon-clear"), QStringLiteral("aoe-loot"), QStringLiteral("transmog"), QStringLiteral("learn-spells"), QStringLiteral("auction-house"), QStringLiteral("multibot-bridge")});
+
+    const QDir clientDirectory(selection.value(QStringLiteral("clientPath")).toString());
+    const QStringList executableNames = isCoa
+        ? QStringList{QStringLiteral("Ascension.exe"), QStringLiteral("ascension.exe"), QStringLiteral("Wow-HD.exe"), QStringLiteral("Wow.exe"), QStringLiteral("wow.exe")}
+        : QStringList{QStringLiteral("Wow-HD.exe"), QStringLiteral("Wow.exe"), QStringLiteral("wow.exe")};
+    const bool hasClientExecutable = std::any_of(executableNames.cbegin(), executableNames.cend(), [&clientDirectory](const QString &name) {
+        return QFileInfo::exists(clientDirectory.filePath(name));
+    });
+    if (!clientDirectory.exists() || !hasClientExecutable) {
+        setNotice(isCoa
+            ? QStringLiteral("The selected CoA client folder must contain Ascension.exe.")
+            : QStringLiteral("The selected client folder must contain Wow.exe."));
+        return;
+    }
+    if (isCoa && !QFileInfo::exists(clientDirectory.filePath(QStringLiteral("Extensions.dll")))) {
+        setNotice(QStringLiteral("The selected CoA native-v4 client is missing Extensions.dll."));
+        return;
+    }
 
     QString installer = qEnvironmentVariable("AZEROTH_CONTROL_INSTALLER");
     if (installer.isEmpty())

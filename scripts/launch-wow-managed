@@ -5,7 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/install.env"
 CONTROL="$ROOT/bin/server-control"
 CONFIG="$CLIENT_PATH/WTF/Config.wtf"
-CLIENT_EXECUTABLE="${CLIENT_EXECUTABLE:-$CLIENT_PATH/Wow.exe}"
+if [[ -z "${CLIENT_EXECUTABLE:-}" ]]; then
+    if [[ "${PROVIDER_ID:-azerothcore-playerbots}" == azerothcore-coa && -f "$CLIENT_PATH/Ascension.exe" ]]; then
+        CLIENT_EXECUTABLE="$CLIENT_PATH/Ascension.exe"
+    elif [[ -f "$CLIENT_PATH/Wow-HD.exe" ]]; then
+        CLIENT_EXECUTABLE="$CLIENT_PATH/Wow-HD.exe"
+    else
+        CLIENT_EXECUTABLE="$CLIENT_PATH/Wow.exe"
+    fi
+fi
 
 if [[ ! -f "$CLIENT_EXECUTABLE" ]]; then
     printf 'The configured WoW executable is missing: %s\n' "$CLIENT_EXECUTABLE" >&2
@@ -59,7 +67,8 @@ focus_wow_window() {
     command -v xdotool >/dev/null 2>&1 || return 0
     local window_id
     for _ in $(seq 1 240); do
-        window_id="$(xdotool search --class 'wow.exe' 2>/dev/null | tail -1)"
+        window_id="$(xdotool search --class 'ascension.exe' 2>/dev/null | tail -1)"
+        [[ -n "$window_id" ]] || window_id="$(xdotool search --class 'wow.exe' 2>/dev/null | tail -1)"
         if [[ -n "$window_id" ]]; then
             xdotool windowmap "$window_id" >/dev/null 2>&1 || true
             xdotool windowactivate "$window_id" >/dev/null 2>&1 || true

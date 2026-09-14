@@ -183,7 +183,8 @@ function activeClientPath() {
       return environment.match(/^CLIENT_PATH=(.*)$/m)?.[1]?.replace(/^['"]|['"]$/g, '');
     } catch { return ''; }
   })();
-  if (!candidate || !fs.existsSync(path.join(candidate, 'Wow.exe'))) throw new Error('The active server does not have a valid WoW client path.');
+  const executables = ['Ascension.exe', 'ascension.exe', 'Wow-HD.exe', 'Wow.exe', 'wow.exe'];
+  if (!candidate || !executables.some((name) => fs.existsSync(path.join(candidate, name)))) throw new Error('The active server does not have a valid WoW or Ascension client path.');
   return fs.realpathSync(candidate);
 }
 function readCString(buffer, offset) {
@@ -234,7 +235,7 @@ function activeClientSteamShortcut() {
     return executable.startsWith(clientPath + '/') || (managedExecutable && executable === managedExecutable);
   });
   return matches.sort((left, right) => {
-    const score = (entry) => /wow-hd\.exe$/i.test(normalize(entry.Exe)) ? 4 : /wow\.exe$/i.test(normalize(entry.Exe)) ? 3 : normalize(entry.Exe) === managedExecutable ? 2 : 1;
+    const score = (entry) => /ascension\.exe$/i.test(normalize(entry.Exe)) ? 5 : /wow-hd\.exe$/i.test(normalize(entry.Exe)) ? 4 : /wow\.exe$/i.test(normalize(entry.Exe)) ? 3 : normalize(entry.Exe) === managedExecutable ? 2 : 1;
     return score(right) - score(left);
   })[0] || null;
 }
@@ -584,9 +585,9 @@ ipcMain.handle('client-validate', (_event, clientPath) => {
   if (!clientPath || typeof clientPath !== 'string') return { ok: false, message: 'Choose a WoW client folder.' };
   let canonical;
   try { canonical = fs.realpathSync(clientPath); } catch { return { ok: false, message: 'The selected folder does not exist.' }; }
-  const executable = ['Wow.exe', 'wow.exe'].map((name) => path.join(canonical, name)).find(fs.existsSync);
-  if (!executable) return { ok: false, message: 'Wow.exe was not found in this folder.' };
-  if (!fs.statSync(executable).isFile()) return { ok: false, message: 'The selected Wow.exe is not a file.' };
+  const executable = ['Ascension.exe', 'ascension.exe', 'Wow-HD.exe', 'Wow.exe', 'wow.exe'].map((name) => path.join(canonical, name)).find(fs.existsSync);
+  if (!executable) return { ok: false, message: 'Ascension.exe or Wow.exe was not found in this folder.' };
+  if (!fs.statSync(executable).isFile()) return { ok: false, message: 'The selected game executable is not a file.' };
   const dataDirectory = ['Data', 'data'].map((name) => path.join(canonical, name)).find(fs.existsSync);
   if (!dataDirectory) return { ok: false, message: 'The WoW Data folder was not found.' };
   const configPath = path.join(canonical, 'WTF', 'Config.wtf');

@@ -24,7 +24,7 @@ module authors.
 > being migrated from Electron/Chromium to Qt 6 Quick for much faster startup,
 > lower overhead, and more predictable SteamOS Gaming Mode behavior. It is
 > usable for testing, but unfinished flows and bugs are expected. The latest
-> native test build is [v0.4.0-preview.13](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.13);
+> native test build is [v0.4.0-preview.14](https://github.com/Raanh/azeroth-control/releases/tag/v0.4.0-preview.14);
 > the packaged stable snapshot remains [v0.2.0](https://github.com/Raanh/azeroth-control/releases/tag/v0.2.0).
 
 ## What the 0.4 native preview can do
@@ -149,8 +149,9 @@ raids use a minimum player count of one; CoA's separate creature level scaler
 is disabled to avoid double scaling. World Settings can set kill, quest and
 exploration XP together from 0× to 20×, including 5×.
 
-You must provide the matching Ascension native-v4 client containing `Wow.exe`
-and `Extensions.dll`. Azeroth Control does not download or redistribute that
+You must provide the matching Ascension native-v4 client containing
+`Ascension.exe` and `Extensions.dll`. `Ascension.exe` is preferred; compatible
+clients renamed to `Wow.exe` remain accepted. Azeroth Control does not download or redistribute that
 client. Playerbots, queue controls and Party Builder are unavailable for this
 provider. CoA gameplay compatibility remains upstream experimental, and the
 in-app source updater is intentionally disabled until a newer revision is
@@ -163,8 +164,10 @@ Steam Deck or Steam Machine. Other x86-64 Linux distributions are experimental.
 
 You should have:
 
-- A separate, complete WoW WotLK 3.3.5a client (build 12340) containing
-  `Wow.exe` and a `Data` directory. `Wow-HD.exe` is used when present.
+- A separate, complete game client: standard WotLK installations contain
+  `Wow.exe` and a `Data` directory, while CoA native-v4 installations contain
+  `Ascension.exe`, `Extensions.dll`, and a `Data` directory. `Wow-HD.exe` is
+  preferred for standard clients when present.
 - A user-created non-Steam shortcut for that WoW executable. Azeroth Control
   deliberately does not add or launch the game.
 - Proton Experimental installed from the Steam library.
@@ -182,7 +185,7 @@ You should have:
 
 1. Open the [Releases](https://github.com/raanh/azeroth-control/releases) page
    and download both:
-   - `Azeroth-Control-0.4.0-preview.13-x86_64.AppImage`
+   - `Azeroth-Control-0.4.0-preview.14-x86_64.AppImage`
    - `Azeroth-Control-SteamOS.sh`
 2. In Desktop Mode, create `~/Applications` and move both downloaded files into
    it.
@@ -193,7 +196,8 @@ You should have:
    `Azeroth Control`.
 5. Do not force a Proton compatibility tool for Azeroth Control itself; it is a
    native Linux application. Proton Experimental is used later for WoW.
-6. Still in Desktop Mode, add your own `Wow.exe` or `Wow-HD.exe` as a separate
+6. Still in Desktop Mode, add your own `Ascension.exe`, `Wow.exe`, or
+   `Wow-HD.exe` as a separate
    non-Steam game. Open its **Properties → Compatibility**, enable **Force the
    use of a specific Steam Play compatibility tool**, and choose **Proton
    Experimental**.

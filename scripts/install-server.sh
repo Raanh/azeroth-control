@@ -88,8 +88,28 @@ if [[ -z "$INSTALL_ROOT" || "$INSTALL_ROOT" == "/" || "$INSTALL_ROOT" == "$HOME"
     printf 'Refusing unsafe installation location: %s\n' "$INSTALL_ROOT" >&2
     exit 2
 fi
-if [[ ! -d "$CLIENT_PATH" || ! -f "$CLIENT_PATH/Wow.exe" ]]; then
-    printf 'The selected folder does not contain Wow.exe.\n' >&2
+if [[ ! -d "$CLIENT_PATH" ]]; then
+    printf 'The selected client folder does not exist.\n' >&2
+    exit 2
+fi
+CLIENT_EXECUTABLE=""
+if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+    CLIENT_EXECUTABLE_NAMES=(Ascension.exe ascension.exe Wow-HD.exe Wow.exe wow.exe)
+else
+    CLIENT_EXECUTABLE_NAMES=(Wow-HD.exe Wow.exe wow.exe)
+fi
+for executable_name in "${CLIENT_EXECUTABLE_NAMES[@]}"; do
+    if [[ -f "$CLIENT_PATH/$executable_name" ]]; then
+        CLIENT_EXECUTABLE="$CLIENT_PATH/$executable_name"
+        break
+    fi
+done
+if [[ -z "$CLIENT_EXECUTABLE" ]]; then
+    if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
+        printf 'The selected CoA client folder does not contain Ascension.exe.\n' >&2
+    else
+        printf 'The selected folder does not contain Wow.exe.\n' >&2
+    fi
     exit 2
 fi
 if [[ "$PROVIDER_ID" == azerothcore-coa && ! -f "$CLIENT_PATH/Extensions.dll" ]]; then
@@ -238,8 +258,6 @@ if [[ "$PROVIDER_ID" == azerothcore-coa && "$PROFILE" != coa ]] || [[ "$PROVIDER
     exit 2
 fi
 REALM_NAME="${SERVER_NAME:-$REALM_NAME}"
-CLIENT_EXECUTABLE="$CLIENT_PATH/Wow.exe"
-[[ -f "$CLIENT_PATH/Wow-HD.exe" ]] && CLIENT_EXECUTABLE="$CLIENT_PATH/Wow-HD.exe"
 COA_DBC_DIR=""
 if [[ "$PROVIDER_ID" == azerothcore-coa ]]; then
     while IFS= read -r -d '' appearance_dbc; do

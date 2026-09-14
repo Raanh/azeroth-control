@@ -271,8 +271,12 @@ def client_executable() -> Path:
     if not raw_client:
         return ROOT / ".missing-wow-client"
     client = Path(raw_client).expanduser()
-    hd = client / "Wow-HD.exe"
-    return hd if hd.is_file() else client / "Wow.exe"
+    names = (
+        ("Ascension.exe", "ascension.exe", "Wow-HD.exe", "Wow.exe", "wow.exe")
+        if provider_id() == "azerothcore-coa"
+        else ("Wow-HD.exe", "Wow.exe", "wow.exe")
+    )
+    return next((client / name for name in names if (client / name).is_file()), client / names[0])
 
 
 def run(args: list[str], timeout: int = 15, input_text: str | None = None) -> subprocess.CompletedProcess[str]:

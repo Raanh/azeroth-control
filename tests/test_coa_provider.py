@@ -10,6 +10,27 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 
 
 class CoAProviderTests(unittest.TestCase):
+    def import_server(self, root: Path, module_name: str):
+        old_root = os.environ.get("AZEROTH_SERVER_ROOT")
+        old_backup = os.environ.get("AZEROTH_CONTROL_BACKUP_ROOT")
+        os.environ["AZEROTH_SERVER_ROOT"] = str(root)
+        os.environ["AZEROTH_CONTROL_BACKUP_ROOT"] = str(root / "backups")
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, REPOSITORY / "backend/server.py")
+            server = importlib.util.module_from_spec(spec)
+            assert spec.loader
+            spec.loader.exec_module(server)
+            return server
+        finally:
+            if old_root is None:
+                os.environ.pop("AZEROTH_SERVER_ROOT", None)
+            else:
+                os.environ["AZEROTH_SERVER_ROOT"] = old_root
+            if old_backup is None:
+                os.environ.pop("AZEROTH_CONTROL_BACKUP_ROOT", None)
+            else:
+                os.environ["AZEROTH_CONTROL_BACKUP_ROOT"] = old_backup
+
     def test_catalog_has_pinned_coa_and_optional_autobalance(self):
         catalog = json.loads((REPOSITORY / "manifests/catalog.json").read_text())
         coa = next(item for item in catalog["providers"] if item["id"] == "azerothcore-coa")
@@ -18,6 +39,22 @@ class CoAProviderTests(unittest.TestCase):
         autobalance = next(item for item in coa["modules"] if item["id"] == "autobalance")
         self.assertRegex(autobalance["revision"], r"^[0-9a-f]{40}$")
         self.assertTrue(autobalance["default"])
+
+    def test_coa_prefers_ascension_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            client = root / "ascension-live"
+            client.mkdir()
+            (client / "Ascension.exe").touch()
+            (client / "Wow.exe").touch()
+            (root / "install-selection.json").write_text(json.dumps({
+                "provider": "azerothcore-coa",
+                "clientPath": str(client),
+            }))
+            server = self.import_server(root, "coa_client_test_server")
+            self.assertEqual(server.client_executable(), client / "Ascension.exe")
+            installer = (REPOSITORY / "scripts/install-server.sh").read_text()
+            self.assertIn("CLIENT_EXECUTABLE_NAMES=(Ascension.exe ascension.exe", installer)
 
     def test_coa_xp_rate_writes_all_azerothcore_rate_keys(self):
         with tempfile.TemporaryDirectory() as temporary:

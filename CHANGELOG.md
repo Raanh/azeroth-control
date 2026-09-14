@@ -2,6 +2,14 @@
 
 All notable public changes to Azeroth Control are documented here.
 
+## [0.4.0-preview.14] - 2026-09-14
+
+### Fixed
+
+- Accept and prefer `Ascension.exe` for CoA native-v4 clients throughout
+  installation, maintenance checks, Steam shortcut discovery, and fallback
+  launching.
+
 ## [0.4.0-preview.13] - 2026-09-14
 
 ### Fixed

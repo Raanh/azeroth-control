@@ -18,7 +18,7 @@ startup freeze while leaving the WoW shortcut and Proton Experimental setup
 unchanged.
 
 The native application intentionally does not launch WoW. Users add their own
-`Wow.exe` or `Wow-HD.exe` non-Steam shortcut, select Proton Experimental, start
+`Ascension.exe`, `Wow.exe`, or `Wow-HD.exe` non-Steam shortcut, select Proton Experimental, start
 the desired realm in Azeroth Control, and launch the game separately through
 Steam. This keeps Gamescope focus and lifecycle ownership unambiguous.
 
